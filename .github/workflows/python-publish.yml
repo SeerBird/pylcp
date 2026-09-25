@@ -1,0 +1,116 @@
+name: Build and Release Python Package
+
+on:
+  push:
+    branches:
+      - master
+      - main
+    paths:
+      - 'pyproject.toml' # Triggers automatically when version is updated in pyproject.toml
+
+permissions:
+  contents: write  # Needed to natively create the GitHub Release
+  id-token: write  # Needed for PyPI Trusted Publishing (when enabled)
+
+jobs:
+  check-version-change:
+    runs-on: ubuntu-latest
+    outputs:
+      version_changed: ${{ steps.filter.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check if version changed
+        id: filter
+        run: |
+          if git diff HEAD~1 HEAD -- pyproject.toml | grep -q '^+version ='; then
+            echo "version=true" >> $GITHUB_OUTPUT
+          else
+            echo "version=false" >> $GITHUB_OUTPUT
+          fi
+
+  release-and-build:
+    runs-on: ubuntu-latest
+    needs: check-version-change
+    if: needs.check-version-change.outputs.version_changed == 'true'
+    outputs:
+      version: ${{ steps.version_parser.outputs.VERSION }}
+      commit_msg: ${{ steps.commit_message.outputs.MSG }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 1. Parse version string from pyproject.toml
+      - name: Parse Version
+        id: version_parser
+        run: |
+          VER=$(grep -m 1 '^version =' pyproject.toml | cut -d '"' -f 2)
+          echo "VERSION=$VER" >> $GITHUB_OUTPUT
+
+      # 2. Get latest commit message
+      - name: Get Commit Message
+        id: commit_message
+        run: |
+          MSG=$(git log -1 --pretty=%B)
+          echo "MSG<<EOF" >> $GITHUB_OUTPUT
+          echo "$MSG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      # 3. Create GitHub Release
+      - name: Spawn GitHub Release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const version = "${{ steps.version_parser.outputs.VERSION }}";
+            const commitMsg = `${{ steps.commit_message.outputs.MSG }}`;
+            const isPrerelease = version.includes('-');
+            
+            await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: `v${version}`,
+              name: `v${version}`,
+              body: commitMsg,
+              prerelease: isPrerelease
+            });
+
+      # 4. Set up Python
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      # 5. Build distributions (sdist and wheel)
+      - name: Build release distributions
+        run: |
+          python3 -m pip install build
+          python3 -m build
+
+      # 6. Save distributions artifact
+      - name: Upload distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-dists
+          path: dist/
+
+  pypi-publish:
+    runs-on: ubuntu-latest
+    needs:
+      - check-version-change
+      - release-and-build
+    # NOTE: PyPI publishing is currently disabled (if: false).
+    # Change 'if: false' to 'if: needs.check-version-change.outputs.version_changed == 'true'' when ready to publish to PyPI.
+    if: false
+    steps:
+      - name: Retrieve release distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: release-dists
+          path: dist/
+
+      - name: Publish release distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/

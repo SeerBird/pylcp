@@ -3,6 +3,7 @@ author: SPE
 
 Basics of the lcp physics package
 """
+__version__ = "1.0.2"
 import numpy as np
 
 from . import hamiltonians

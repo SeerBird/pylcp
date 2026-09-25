@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pylcp"
+version = "1.0.2"
+description = "A package for calculating laser cooling physics"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "NIST"
+license-files = ["LICENSE*"]
+authors = [
+  { name = "Stephen Eckel" },
+  { name = "Daniel Barker" },
+  { name = "Eric Norrgard" }
+]
+keywords = ["atomic physics", "laser cooling", "numerical integration"]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+]
+
+dependencies = [
+  "docutils>=0.3",
+  "numpy>=1.18",
+  "numba>=0.48",
+  "scipy>=1.4.1",
+  "sympy>=1.6",
+]
+
+[project.urls]
+Homepage = "https://github.com/JQIamo/pylcp/"
+"Bug Tracker" = "https://github.com/JQIamo/pylcp/issues"
+Documentation = "https://python-laser-cooling-physics.readthedocs.io/en/stable"
+"Source Code" = "https://github.com/JQIamo/pylcp/"
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/pylcp",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["pylcp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+pythonpath = ["."]
