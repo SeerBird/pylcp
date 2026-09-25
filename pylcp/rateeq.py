@@ -15,7 +15,9 @@ from .governingeq import governingeq
 from .integration_tools import solve_ivp_random
 from scipy.interpolate import interp1d
 
-#@numba.vectorize([numba.float64(numba.complex128),numba.float32(numba.complex64)])
+import numba
+
+@numba.vectorize([numba.float64(numba.complex128), numba.float32(numba.complex64)])
 def abs2(x):
     return x.real**2 + x.imag**2
 

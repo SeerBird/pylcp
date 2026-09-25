@@ -1,12 +1,18 @@
+import functools
+
 import numpy as np
-from sympy.physics.wigner import wigner_3j, wigner_6j, wigner_9j
 import scipy.constants as cts
+from sympy.physics.wigner import wigner_3j, wigner_6j
+
 from . import XFmolecules
 
+
+@functools.lru_cache(maxsize=4096)
 def wig3j(j1, j2, j3, m1, m2, m3):
     return float(wigner_3j(j1, j2, j3, m1, m2, m3))
 
 
+@functools.lru_cache(maxsize=4096)
 def wig6j(j1, j2, j3, m1, m2, m3):
     return float(wigner_6j(j1, j2, j3, m1, m2, m3))
 
@@ -74,16 +80,32 @@ def fine_structure_uncoupled(L, S, I, xi, a_c, a_orb, a_dip, gL, gS, gI,
     n_basis = len(basis)
     mu_q = np.zeros((3, n_basis, n_basis))
 
-    # Start with the magnetic field dependent matrices:
+    # Start with the magnetic field dependent matrices using Kronecker tensor products:
+    nL = int(2*L + 1)
+    nS = int(2*S + 1)
+    nI = int(2*I + 1)
+    mu_L = np.zeros((3, nL, nL))
+    mu_S = np.zeros((3, nS, nS))
+    mu_I = np.zeros((3, nI, nI))
     for kk, q in enumerate([-1, 0, 1]):
-        for jj, (mLp, mSp, mIp) in enumerate(basis):
-            for ii, (mL, mS, mI) in enumerate(basis):
-                if mS==mSp and mIp==mI:
-                    mu_q[kk, ii, jj] += gL*muB*(-1)**(L-mL)*wig3j(L, 1, L, -mL, q, mLp)*np.sqrt(L*(L+1)*(2*L+1))
-                if mL==mLp and mIp==mI:
-                    mu_q[kk, ii, jj] += gS*muB*(-1)**(S-mS)*wig3j(S, 1, S, -mS, q, mSp)*np.sqrt(S*(S+1)*(2*S+1))
-                if mL==mLp and mSp==mS:
-                    mu_q[kk, ii, jj] -= gI*muB*(-1)**(I-mI)*wig3j(I, 1, I, -mI, q, mIp)*np.sqrt(I*(I+1)*(2*I+1))
+        for i_l, mL in enumerate(np.arange(-L, L+1)):
+            mLp = mL - q
+            if abs(mLp) <= L:
+                mu_L[kk, i_l, int(mLp + L)] = gL*muB*(-1)**(L-mL)*wig3j(L, 1, L, -mL, q, mLp)*np.sqrt(L*(L+1)*(2*L+1))
+        for i_s, mS in enumerate(np.arange(-S, S+1)):
+            mSp = mS - q
+            if abs(mSp) <= S:
+                mu_S[kk, i_s, int(mSp + S)] = gS*muB*(-1)**(S-mS)*wig3j(S, 1, S, -mS, q, mSp)*np.sqrt(S*(S+1)*(2*S+1))
+        for i_i, mI in enumerate(np.arange(-I, I+1)):
+            mIp = mI - q
+            if abs(mIp) <= I:
+                mu_I[kk, i_i, int(mIp + I)] = gI*muB*(-1)**(I-mI)*wig3j(I, 1, I, -mI, q, mIp)*np.sqrt(I*(I+1)*(2*I+1))
+
+    I_L = np.eye(nL)
+    I_S = np.eye(nS)
+    I_I = np.eye(nI)
+    for kk in range(3):
+        mu_q[kk] = np.kron(mu_L[kk], np.kron(I_S, I_I)) + np.kron(I_L, np.kron(mu_S[kk], I_I)) - np.kron(I_L, np.kron(I_S, mu_I[kk]))
 
     # Need to define the OTHER mu_q matrices!
 
@@ -126,7 +148,7 @@ def fine_structure_uncoupled(L, S, I, xi, a_c, a_orb, a_dip, gL, gS, gI,
         # (III)
         if mS+1<=S and mI-1>=-I:
             t1 = np.sqrt((S-mS)*(S+mS+1)*(I+mI)*(I-mI+1))
-            drow = int(np.round(2*I));
+            drow = int(np.round(2*I))
             if np.abs(a_c)>0.:
                 H_0[ii+drow, ii] += t1*(L+S)*a_c/2/S
             if L>0 and np.abs(a_dip)>0.:
@@ -240,20 +262,27 @@ def hyperfine_uncoupled(J, I, gJ, gI, Ahfs, Bhfs=0, Chfs=0,
 
     num_of_states = int((2*J+1)*(2*I+1))
     H_0 = np.zeros((num_of_states, num_of_states))
-    H_Bq = np.zeros((3,num_of_states, num_of_states))
+    mu_q = np.zeros((3,num_of_states, num_of_states))
 
-    # Start with the magnetic field dependent matrices:
+    # Start with the magnetic field dependent matrices using Kronecker products:
+    nJ = int(2*J + 1)
+    nI = int(2*I + 1)
+    mu_q_J = np.zeros((3, nJ, nJ))
+    mu_q_I = np.zeros((3, nI, nI))
     for kk, q in enumerate([-1, 0, 1]):
-        for mJ in np.arange(-J, J+0.1, 1):
-            for mJp in np.arange(-J, J+0.1, 1):
-                for mI in np.arange(-I, I+0.1, 1):
-                    for mIp in np.arange(-I, I+0.1, 1):
-                        if mIp==mI:
-                            mu_q[kk, index(J, I, mJ, mI), index(J, I, mJp, mIp)] += \
-                            gJ*muB*(-1)**(J-mJ)*wig3j(J, 1, J, -mJ, q, mJp)*np.sqrt(J*(J+1)*(2*J+1))
-                        if mJ==mJp:
-                            mu_q[kk, index(J, I, mJ, mI), index(J, I, mJp, mIp)] -= \
-                            gI*muB*(-1)**(I-mI)*wig3j(I, 1, I, -mI, q, mIp)*np.sqrt(I*(I+1)*(2*I+1))
+        for i_j, mJ in enumerate(np.arange(-J, J+0.1, 1)):
+            mJp = mJ - q
+            if abs(mJp) <= J:
+                j_j = int(mJp + J)
+                mu_q_J[kk, i_j, j_j] = gJ*muB*(-1)**(J-mJ)*wig3j(J, 1, J, -mJ, q, mJp)*np.sqrt(J*(J+1)*(2*J+1))
+        for i_i, mI in enumerate(np.arange(-I, I+0.1, 1)):
+            mIp = mI - q
+            if abs(mIp) <= I:
+                j_i = int(mIp + I)
+                mu_q_I[kk, i_i, j_i] = gI*muB*(-1)**(I-mI)*wig3j(I, 1, I, -mI, q, mIp)*np.sqrt(I*(I+1)*(2*I+1))
+
+    for kk in range(3):
+        mu_q[kk] = np.kron(mu_q_J[kk], np.eye(nI)) - np.kron(np.eye(nJ), mu_q_I[kk])
 
     # Next, do the J_zI_z diagonal elements of J\dotI operator:
     for mJ in np.arange(-J, J+1, 1):
@@ -336,9 +365,9 @@ def hyperfine_uncoupled(J, I, gJ, gI, Ahfs, Bhfs=0, Chfs=0,
             for mI in range(-I,I+1):
                 basis[index(J, I, mJ, mI)] = np.array([J, I, mJ, mI])
 
-        return H_0, H_Bq, basis
+        return H_0, mu_q, basis
     else:
-        return H_0, H_Bq
+        return H_0, mu_q
 
 
 def coupled_index(F, mF, Fmin):
@@ -417,16 +446,15 @@ def hyperfine_coupled(J, I, gJ, gI, Ahfs, Bhfs=0, Chfs=0,
                            - 5*I*(I+1)*J*(J+1))/\
         (I*(I-1)*(2*I-1)*J*(J-1)*(2*J-1))
 
-    # Insert the diagonal (field indepedent part):
-    for ii in range(num_of_states):
-        H_0[ii,ii] = diag_elem[ii]
+    # Insert the diagonal (field independent part):
+    H_0 = np.diag(diag_elem)
 
     # Now work on the field dependent part:
     mu_q = np.zeros((3, num_of_states, num_of_states))
 
-    for ii, q in enumerate(range(-1, 2)):
+    for ii, q in enumerate([-1, 0, 1]):
         for Fp in np.arange(Fmin, Fmax+0.5, 1):
-            for F in np.arange(Fmin, Fmax+0.5, 1):
+            for F in np.arange(max(Fmin, Fp-1), min(Fmax, Fp+1)+0.5, 1):
                 for mFp in np.arange(-Fp, Fp+0.5, 1):
                     mF = mFp+q
                     if not np.abs(mF)>F:
@@ -504,13 +532,9 @@ def singleF(F, gF=1, muB=(cts.value("Bohr magneton in Hz/T")*1e-4),
 
 
 def dqij_norm(dqij):
-    dqij_norm = np.zeros(dqij.shape)
-    for ii in range(dqij.shape[0]):
-        for jj in range(dqij.shape[2]):
-            dqij_norm[ii, :, jj] = dqij[ii, :, jj]/\
-                np.linalg.norm(dqij[:, :, jj])
-
-    return dqij_norm
+    norms = np.linalg.norm(dqij, axis=(0, 1), keepdims=True)
+    norms[norms == 0] = 1.0
+    return dqij / norms
 
 
 def dqij_two_hyperfine_manifolds(J, Jp, I, normalize=True, return_basis=False):

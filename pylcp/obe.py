@@ -635,7 +635,7 @@ class obe(governingeq):
         for key in self.laserBeams.keys():
             if self.transform_into_re_im:
                 Eq = self.laserBeams[key].total_electric_field(r, t)
-                for ii, q in enumerate(np.arange(-1., 2., 1)):
+                for ii, q in enumerate([-1.0, 0.0, 1.0]):
                     if np.abs(Eq[2-ii])>1e-10:
                         drhodt -= ((-1.)**q*np.real(Eq[2-ii])*
                                    (self.ev_mat['reE'][key][ii] @ rho))
@@ -643,7 +643,7 @@ class obe(governingeq):
                                    (self.ev_mat['imE'][key][ii] @ rho))
             else:
                 Eq = self.laserBeams[key].total_electric_field(np.real(r), t)
-                for ii, q in enumerate(np.arange(-1., 2., 1)):
+                for ii, q in enumerate([-1.0, 0.0, 1.0]):
                     if np.abs(Eq[2-ii])>1e-10:
                         drhodt -= ((-1.)**q*Eq[2-ii]*
                                    (self.ev_mat['d_q'][key][ii] @ rho))
