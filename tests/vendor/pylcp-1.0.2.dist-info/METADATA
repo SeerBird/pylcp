@@ -1,0 +1,29 @@
+Metadata-Version: 2.1
+Name: pylcp
+Version: 1.0.2
+Summary: A package for calculating laser cooling physics
+Home-page: https://github.com/JQIamo/pylcp/
+Author: Stephen Eckel, Daniel Barker, Eric Norrgard
+Author-email: pylcp@googlegroups.com
+License: NIST
+Project-URL: Bug Tracker, https://github.com/JQIamo/pylcp/issues
+Project-URL: Documentation, https://python-laser-cooling-physics.readthedocs.io/en/stable
+Project-URL: Source Code, https://github.com/JQIamo/pylcp/
+Keywords: atomic physics,laser cooling,numerical integration
+Platform: UNKNOWN
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Intended Audience :: Science/Research
+Classifier: License :: Other/Proprietary License
+Classifier: Programming Language :: Python :: 3.6
+Classifier: Programming Language :: Python :: 3.7
+Classifier: Programming Language :: Python :: 3.8
+Requires-Python: >=3.6, <4
+Requires-Dist: docutils (>=0.3)
+Requires-Dist: numpy (>=1.18)
+Requires-Dist: numba (>=0.48)
+Requires-Dist: scipy (>=1.4.1)
+Requires-Dist: sympy (>=1.6)
+
+UNKNOWN
+
+

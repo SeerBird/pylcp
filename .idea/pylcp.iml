@@ -7,11 +7,8 @@
     <orderEntry type="jdk" jdkName="~\Desktop\G\Offline\Code\pylcp\venv" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
   </component>
-  <component name="PackageRequirementsSettings" />
   <component name="PyDocumentationSettings">
     <option name="format" value="NUMPY" />
     <option name="myDocStringFormat" value="NumPy" />
   </component>
-  <component name="ReSTService" />
-  <component name="TestRunnerService" />
 </module>
