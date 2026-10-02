@@ -10,8 +10,15 @@ def test_pylcp_version():
     assert pylcp.__version__ == "1.0.2"
 
 def test_basic_exports():
-    """Verify core classes are exported at top-level."""
-    assert hasattr(pylcp, "atom")
-    assert hasattr(pylcp, "hamiltonian")
-    assert hasattr(pylcp, "rateeq")
-    assert hasattr(pylcp, "obe")
+    """Verify modern PascalCase classes and types are exported at top-level."""
+    assert hasattr(pylcp, "Atom")
+    assert hasattr(pylcp, "State")
+    assert hasattr(pylcp, "Transition")
+    assert hasattr(pylcp, "Hamiltonian")
+    assert hasattr(pylcp, "RateEq")
+    assert hasattr(pylcp, "OBE")
+    assert hasattr(pylcp, "HeuristicEq")
+    assert hasattr(pylcp, "MagField")
+    assert hasattr(pylcp, "LaserBeams")
+    assert hasattr(pylcp, "TransitionKey")
+    assert hasattr(pylcp, "Signature")

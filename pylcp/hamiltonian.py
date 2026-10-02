@@ -1,8 +1,9 @@
 import numpy as np
 from .common import spherical2cart
+from .typing import TransitionKey
 
 # Next, define a Hamiltonian class to work out the internal states:
-class hamiltonian():
+class Hamiltonian():
     """
     A representation of the Hamiltonian in blocks
 
@@ -229,7 +230,7 @@ class hamiltonian():
 
 
     def add_mu_q_block(self, state_label, mu_q, muB=1):
-        """
+        r"""
         Adds a new $\mu_q$ block to the hamiltonian
 
         Parameters
@@ -344,7 +345,7 @@ class hamiltonian():
             )
 
         # Store the laser key for quick access:
-        self.laser_keys[label1 + '->' + label2] = ind
+        self.laser_keys[TransitionKey(label1, label2)] = ind
 
 
     def make_full_matrices(self):
@@ -398,7 +399,7 @@ class hamiltonian():
         for ii in range(self.blocks.shape[0]):
             for jj in range(ii+1, self.blocks.shape[1]):
                 if not self.blocks[ii, jj] is None:
-                    key = self.state_labels[ii] + '->' + self.state_labels[jj]
+                    key = TransitionKey(self.state_labels[ii], self.state_labels[jj])
                     nstart = int(np.sum(self.ns[:ii]))
                     mstart = int(np.sum(self.ns[:jj]))
                     self.d_q_bare[key] = self.blocks[ii, jj].return_block_in_place(nstart, mstart, self.n)
@@ -450,12 +451,12 @@ class hamiltonian():
         H = self.H_0 - np.tensordot(self.mu_q, np.conjugate(Bq), axes=(0, 0))
 
         if isinstance(Eq, list) or isinstance(Eq, np.ndarray):
-            Eq = {'g->e':Eq} # Promote to a dictionary.
+            Eq = {TransitionKey('g', 'e'): Eq} # Promote to a dictionary.
 
-        for key in Eq.keys():
-            for ii, q in enumerate(np.arange(-1., 2., 1.)):
-                H -= (0.5*(-1.)**q*self.d_q_bare[key][ii]*Eq[key][2-ii] +
-                      0.5*(-1.)**q*self.d_q_star[key][ii]*np.conjugate(Eq[key][2-ii]))
+        for key, val in Eq.items():
+            for ii, q in enumerate([-1.0, 0.0, 1.0]):
+                H -= (0.5*(-1.)**q*self.d_q_bare[key][ii]*val[2-ii] +
+                      0.5*(-1.)**q*self.d_q_star[key][ii]*np.conjugate(val[2-ii]))
 
         return H
 
@@ -471,7 +472,7 @@ class hamiltonian():
 
 
     def diag_static_field(self, B):
-        """
+        r"""
         Block diagonalize at a specified magnetic field
 
         This function diagonalizes the Hamiltonian's diagonal blocks separately
@@ -501,7 +502,7 @@ class hamiltonian():
         # If it does not already exist, make an empty Hamiltonian that has
         # the same dimensions as this one.
         if not hasattr(self, 'rotated_hamiltonian'):
-            self.rotated_hamiltonian = hamiltonian()
+            self.rotated_hamiltonian = Hamiltonian()
             for ii, block in enumerate(np.diagonal(self.blocks)):
                 self.rotated_hamiltonian.add_H_0_block(
                     self.state_labels[ii],

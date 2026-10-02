@@ -1,10 +1,10 @@
 import copy
 import numpy as np
-from .fields import magField as magFieldObject
-from .fields import laserBeams as laserBeamsObject
+from .fields import MagField, LaserBeams
+from .typing import TransitionKey
 from scipy.optimize import root_scalar, root
 
-class governingeq(object):
+class GoverningEq(object):
     """
     Governing equation base class
 
@@ -14,23 +14,23 @@ class governingeq(object):
 
     Parameters
     ----------
-    laserBeams : dictionary of pylcp.laserBeams, pylcp.laserBeams, or list of pylcp.laserBeam
+    laserBeams : dictionary of pylcp.LaserBeams, pylcp.LaserBeams, or list of pylcp.LaserBeam
         The laserBeams that will be used in constructing the optical Bloch
         equations.  which transitions in the block diagonal hamiltonian.  It can
         be any of the following:
 
-            * A dictionary of pylcp.laserBeams: if this is the case, the keys of
+            * A dictionary of pylcp.LaserBeams: if this is the case, the keys of
               the dictionary should match available :math:`d^{nm}` matrices
-              in the pylcp.hamiltonian object.  The key structure should be
+              in the pylcp.Hamiltonian object.  The key structure should be
               `n->m`.
-            * pylcp.laserBeams: a single set of laser beams is assumed to
+            * pylcp.LaserBeams: a single set of laser beams is assumed to
               address the transition `g->e`.
-            * a list of pylcp.laserBeam: automatically promoted to a
-              pylcp.laserBeams object assumed to address the transtion `g->e`.
+            * a list of pylcp.LaserBeam: automatically promoted to a
+              pylcp.LaserBeams object assumed to address the transtion `g->e`.
 
-    magField : pylcp.magField or callable
+    magField : pylcp.MagField or callable
         The function or object that defines the magnetic field.
-    hamiltonian : pylcp.hamiltonian or None
+    hamiltonian : pylcp.Hamiltonian or None
         The internal hamiltonian of the particle.
     a : array_like, shape (3,), optional
         A default acceleraiton to apply to the particle's motion, usually
@@ -47,28 +47,23 @@ class governingeq(object):
         self.set_initial_position_and_velocity(r0, v0)
 
         # Add lasers:
-        self.laserBeams = {} # Laser beams are meant to be dictionary,
+        default_tk = TransitionKey('g', 'e')
+        self.laserBeams = {}
         if isinstance(laserBeams, list):
-            self.laserBeams['g->e'] = copy.copy(laserBeamsObject(laserBeams)) # Assume label is g->e
-        elif isinstance(laserBeams, laserBeamsObject):
-            self.laserBeams['g->e'] = copy.copy(laserBeams) # Again, assume label is g->e
+            self.laserBeams[default_tk] = copy.copy(LaserBeams(laserBeams))
+        elif isinstance(laserBeams, LaserBeams):
+            self.laserBeams[default_tk] = copy.copy(laserBeams)
         elif isinstance(laserBeams, dict):
-            for key in laserBeams.keys():
-                if not isinstance(laserBeams[key], laserBeamsObject):
-                    raise TypeError('Key %s in dictionary lasersBeams ' % key +
-                                     'is in not of type laserBeams.')
-            self.laserBeams = copy.copy(laserBeams) # Now, assume that everything is the same.
+            for key, val in laserBeams.items():
+                self.laserBeams[key] = copy.copy(val)
         else:
             raise TypeError('laserBeams is not a valid type.')
 
         # Add in magnetic field:
         if callable(magField) or isinstance(magField, np.ndarray):
-            self.magField = magFieldObject(magField)
-        elif isinstance(magField, magFieldObject):
-            self.magField = copy.copy(magField)
+            self.magField = MagField(magField)
         else:
-            raise TypeError('The magnetic field must be either a lambda ' +
-                            'function or a magField object.')
+            self.magField = copy.copy(magField)
 
         # Add the Hamiltonian:
         if hamiltonian is not None:
@@ -100,8 +95,8 @@ class governingeq(object):
         # Check that laser beam keys and Hamiltonian keys match.
         for laser_key in self.laserBeams.keys():
             if not laser_key in self.hamiltonian.laser_keys.keys():
-                raise ValueError('laserBeams dictionary keys %s ' % laser_key +
-                                 'does not have a corresponding key the '+
+                raise ValueError(f'laserBeams dictionary key {laser_key} ' +
+                                 'does not have a corresponding key in the ' +
                                  'Hamiltonian d_q.')
 
 
@@ -191,13 +186,13 @@ class governingeq(object):
 
         Returns
         -------
-        profile : pylcp.common.base_force_profile
+        profile : pylcp.common.BaseForceProfile
             Resulting force profile.
         """
         pass
 
     def find_equilibrium_position(self, axes, **kwargs):
-        """
+        r"""
         Find the equilibrium position
 
         Uses the find_equilibrium force() method to calculate the where the
@@ -241,7 +236,7 @@ class governingeq(object):
         return self.r_eq
 
     def trapping_frequencies(self, axes, r=None, eps=0.01, **kwargs):
-        """
+        r"""
         Find the trapping frequency
 
         Uses the find_equilibrium force() method to calculate the trapping
@@ -309,7 +304,7 @@ class governingeq(object):
         return self.omega[axes]
 
     def damping_coeff(self, axes, r=None, eps=0.01, **kwargs):
-        """
+        r"""
         Find the damping coefficent
 
         Uses the find_equilibrium force() method to calculate the damping

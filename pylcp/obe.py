@@ -9,12 +9,13 @@ import numba
 import scipy.sparse as sparse
 from scipy.integrate import solve_ivp
 from scipy.interpolate import interp1d
-from .rateeq import rateeq
-from .fields import laserBeams, magField
+from .rateeq import RateEq
+from .fields import LaserBeams, MagField
 from .integration_tools import solve_ivp_random
-from .common import (progressBar, random_vector, spherical_dot,
-                     cart2spherical, spherical2cart, base_force_profile)
-from .governingeq import governingeq
+from .common import (Progressbar, random_vector, spherical_dot,
+                     cart2spherical, spherical2cart, BaseForceProfile)
+from .governingeq import GoverningEq
+from .typing import TransitionKey, OBEEvolutionMatrices
 
 @numba.vectorize([numba.float64(numba.complex128),numba.float32(numba.complex64)])
 def abs2(x):
@@ -40,7 +41,7 @@ def cartesian_vector_tensor_dot(a, B):
         return np.sum(a[np.newaxis, ...]*B[...], axis=1)
 
 
-class force_profile(base_force_profile):
+class force_profile(BaseForceProfile):
     """
     Optical Bloch equation force profile
 
@@ -62,12 +63,12 @@ class force_profile(base_force_profile):
         The forces due to each laser, indexed by the
         manifold the laser addresses.  The dictionary is keyed by the transition
         driven, and individual lasers are in the same order as in the
-        pylcp.laserBeams object used to create the governing equation.
+        pylcp.LaserBeams object used to create the governing equation.
     f_q : dictionary of array_like
         The force due to each laser and its :math:`q` component, indexed by the
         manifold the laser addresses.  The dictionary is keyed by the transition
         driven, and individual lasers are in the same order as in the
-        pylcp.laserBeams object used to create the governing equation.
+        pylcp.LaserBeams object used to create the governing equation.
     Neq : array_like
         Equilibrium population found.
     """
@@ -89,7 +90,7 @@ class force_profile(base_force_profile):
         self.iterations[ind] = iterations
 
 
-class obe(governingeq):
+class OBE(GoverningEq):
     """
     The optical Bloch equations
 
@@ -98,23 +99,23 @@ class obe(governingeq):
 
     Parameters
     ----------
-    laserBeams : dictionary of pylcp.laserBeams, pylcp.laserBeams, or list of pylcp.laserBeam
+    laserBeams : dictionary of pylcp.LaserBeams, pylcp.LaserBeams, or list of pylcp.LaserBeam
         The laserBeams that will be used in constructing the optical Bloch
         equations.  which transitions in the block diagonal hamiltonian.  It can
         be any of the following:
 
-            * A dictionary of pylcp.laserBeams: if this is the case, the keys of
+            * A dictionary of pylcp.LaserBeams: if this is the case, the keys of
               the dictionary should match available :math:`d^{nm}` matrices
-              in the pylcp.hamiltonian object.  The key structure should be
+              in the pylcp.Hamiltonian object.  The key structure should be
               `n->m`.
-            * pylcp.laserBeams: a single set of laser beams is assumed to
+            * pylcp.LaserBeams: a single set of laser beams is assumed to
               address the transition `g->e`.
-            * a list of pylcp.laserBeam: automatically promoted to a
-              pylcp.laserBeams object assumed to address the transtion `g->e`.
+            * a list of pylcp.LaserBeam: automatically promoted to a
+              pylcp.LaserBeams object assumed to address the transtion `g->e`.
 
-    magField : pylcp.magField or callable
+    magField : pylcp.MagField or callable
         The function or object that defines the magnetic field.
-    hamiltonian : pylcp.hamiltonian
+    hamiltonian : pylcp.Hamiltonian
         The internal hamiltonian of the particle.
     a : array_like, shape (3,), optional
         A default acceleraiton to apply to the particle's motion, usually
@@ -141,12 +142,12 @@ class obe(governingeq):
     Methods
     -------
     """
-    def __init__(self, laserBeams, magField, hamitlonian,
+    def __init__(self, laserBeams, magField, hamiltonian,
                  a=np.array([0., 0., 0.]), transform_into_re_im=True,
                  use_sparse_matrices=None, include_mag_forces=True,
                  r0=np.array([0., 0., 0.]), v0=np.array([0., 0., 0.])):
 
-        super().__init__(laserBeams, magField, hamitlonian, a=a,
+        super().__init__(laserBeams, magField, hamiltonian, a=a,
                          r0=r0, v0=v0)
 
         # Save the optional arguments:
@@ -174,7 +175,7 @@ class obe(governingeq):
         # compute the latter-two directly from the commuatator.
 
         # Build the matricies that control evolution:
-        self.ev_mat = {}
+        self.ev_mat = OBEEvolutionMatrices()
         self.__build_decay_ev()
         self.__build_coherent_ev()
 
@@ -527,7 +528,7 @@ class obe(governingeq):
         the equilibrium populations as determined by pylcp.rateeq
         """
         if not hasattr(self, 'rateeq'):
-            self.rateeq = rateeq(self.laserBeams, self.magField, self.hamiltonian)
+            self.rateeq = RateEq(self.laserBeams, self.magField, self.hamiltonian)
         Neq = self.rateeq.equilibrium_populations(self.r0, self.v0, t=0)
         self.set_initial_rho_from_populations(Neq)
 
@@ -702,7 +703,7 @@ class obe(governingeq):
         a = np.zeros((3,))
 
         if progress_bar:
-            progress = progressBar()
+            progress = Progressbar()
 
         def dydt(t, y):
             if progress_bar and t<=t_span[1]:
@@ -779,7 +780,7 @@ class obe(governingeq):
         random_recoil_flag = random_recoil
 
         if progress_bar:
-            progress = progressBar()
+            progress = Progressbar()
 
         if record_force:
             ts = []
@@ -996,7 +997,7 @@ class obe(governingeq):
             # or (3, 3, t.size).  The first two dimensions are like
             # [dBx/dx, dBy/dx, dBz/dx; dBx/dy, dBy/dy, dBz/dy], and so on.
             # We need to dot, and su
-            delB = self.magField.gradField(np.real(r))
+            delB = self.magField.gradient(np.real(r))
 
             # What's the expectation value of mu?  Returns (3,) or (3, t.size)
             av_mu = self.observable(self.hamiltonian.mu, rho)
@@ -1200,7 +1201,7 @@ class obe(governingeq):
                                   ['readonly'], ['readonly'], ['readonly']])
 
         if progress_bar:
-            progress = progressBar()
+            progress = Progressbar()
 
         for (x, y, z, vx, vy, vz) in it:
             # Construct the rate equations:

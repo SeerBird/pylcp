@@ -1,9 +1,8 @@
 import time
 import copy
 import numpy as np
-from scipy.optimize import fsolve
 
-class progressBar(object):
+class Progressbar(object):
     def __init__(self, decimals=1, fill='█', prefix='Progress:',
                  suffix='', time_remaining_prefix=' time left', length=30,
                  update_rate=0.5):
@@ -73,7 +72,7 @@ def spherical_dot(A, B):
     return np.tensordot(A, np.array([-1., 1., -1.])*B[::-1], axes=(0, 0))
     #return np.tensordot(A, np.conjugate(B), axes=(0,0))
 
-class base_force_profile():
+class BaseForceProfile:
     """
     Base force profile
 
@@ -137,7 +136,7 @@ class base_force_profile():
             self.f_mag[(jj,) + ind] = F_mag[jj]
 
 
-def random_vector(rng, free_axes=[True, True, True]):
+def random_vector(rng, free_axes=None):
     """
     This function returns a random vector in either 1D, 2D or 3D
 
@@ -154,6 +153,8 @@ def random_vector(rng, free_axes=[True, True, True]):
         vector: array_like of shape (3,)
             Random vector with unit length.
     """
+    if free_axes is None:
+        free_axes = [True, True, True]
     if np.sum(free_axes)==1:
         return (np.sign(rng.random(1)-0.5)*free_axes).astype('float64')
     elif np.sum(free_axes)==2:
@@ -170,19 +171,4 @@ def random_vector(rng, free_axes=[True, True, True]):
         return np.array([np.sin(th)*np.cos(phi), np.sin(th)*np.sin(phi),
                          np.cos(th)])
     else:
-        raise StandardError('free_axes must be a boolean array of length 3.')
-
-
-if __name__ == '__main__':
-    import matplotlib.pyplot as plt
-    from mpl_toolkits.mplot3d import Axes3D
-
-    vectors = []
-    for n in range(500):
-        vectors.append(random_vector([True, True, True]))
-
-    vectors = np.array(vectors)
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
-    ax.scatter(vectors[:,0], vectors[:,1], vectors[:,2])
-    ax.view_init(elev=-90., azim=0.)
+        raise ValueError('free_axes must be a boolean array of length 3.')

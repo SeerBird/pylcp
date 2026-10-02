@@ -8,10 +8,11 @@ import copy
 from scipy.optimize import minimize
 from scipy.integrate import solve_ivp
 from inspect import signature
-from .fields import laserBeams, magField
-from .common import (progressBar, random_vector, spherical_dot,
-                     cart2spherical, spherical2cart, base_force_profile)
-from .governingeq import governingeq
+from .fields import LaserBeams, MagField
+from .common import (Progressbar, random_vector, spherical_dot,
+                     cart2spherical, spherical2cart, BaseForceProfile)
+from .governingeq import GoverningEq
+from .typing import TransitionKey, RateEqEvolutionMatrices
 from .integration_tools import solve_ivp_random
 from scipy.interpolate import interp1d
 
@@ -21,7 +22,7 @@ import numba
 def abs2(x):
     return x.real**2 + x.imag**2
 
-class force_profile(base_force_profile):
+class force_profile(BaseForceProfile):
     """
     Rate equation force profile
 
@@ -43,14 +44,14 @@ class force_profile(base_force_profile):
         The forces due to each laser, indexed by the
         manifold the laser addresses.  The dictionary is keyed by the transition
         driven, and individual lasers are in the same order as in the
-        pylcp.laserBeams object used to create the governing equation.
+        pylcp.LaserBeams object used to create the governing equation.
     Neq : array_like
         Equilibrium population found.
     Rijl : dictionary of array_like
         The pumping rates of each laser, indexed by the
         manifold the laser addresses.  The dictionary is keyed by the transition
         driven, and individual lasers are in the same order as in the
-        pylcp.laserBeams object used to create the governing equation.
+        pylcp.LaserBeams object used to create the governing equation.
     """
     def __init__(self, R, V, laserBeams, hamiltonian):
         super().__init__(R, V, laserBeams, hamiltonian)
@@ -71,7 +72,7 @@ class force_profile(base_force_profile):
             self.Rijl[key][ind] = Rijl[key]
 
 
-class rateeq(governingeq):
+class RateEq(GoverningEq):
     """
     The rate equations
 
@@ -80,22 +81,22 @@ class rateeq(governingeq):
 
     Parameters
     ----------
-    laserBeams : dictionary of pylcp.laserBeams, pylcp.laserBeams, or list of pylcp.laserBeam
+    laserBeams : dictionary of pylcp.LaserBeams, pylcp.LaserBeams, or list of pylcp.LaserBeam
         The laserBeams that will be used in constructing the optical Bloch
         equations.  which transitions in the block diagonal hamiltonian.  It can
         be any of the following:
 
-            * A dictionary of pylcp.laserBeams: if this is the case, the keys of
+            * A dictionary of pylcp.LaserBeams: if this is the case, the keys of
               the dictionary should match available :math:`d^{nm}` matrices
-              in the pylcp.hamiltonian object.  The key structure should be
+              in the pylcp.Hamiltonian object.  The key structure should be
               `n->m`.
-            * pylcp.laserBeams: a single set of laser beams is assumed to
+            * pylcp.LaserBeams: a single set of laser beams is assumed to
               address the transition `g->e`.
-            * a list of pylcp.laserBeam: automatically promoted to a
-              pylcp.laserBeams object assumed to address the transtion `g->e`.
-    magField : pylcp.magField or callable
+            * a list of pylcp.LaserBeam: automatically promoted to a
+              pylcp.LaserBeams object assumed to address the transtion `g->e`.
+    magField : pylcp.MagField or callable
         The function or object that defines the magnetic field.
-    hamiltonian : pylcp.hamiltonian
+    hamiltonian : pylcp.Hamiltonian
         The internal hamiltonian of the particle.
     a : array_like, shape (3,), optional
         A default acceleraiton to apply to the particle's motion, usually
@@ -108,38 +109,22 @@ class rateeq(governingeq):
     v0 : array_like, shape (3,), optional
         Initial velocity.  Default: [0., 0., 0.]
     """
-    def __init__(self, laserBeams, magField, hamitlonian,
+    def __init__(self, laserBeams, magField, hamiltonian,
                  a=np.array([0., 0., 0.]), include_mag_forces=True,
                  svd_eps=1e-10, r0=np.array([0., 0., 0.]),
                  v0=np.array([0., 0., 0.])):
         # First step is to save the imported laserBeams, magField, and
         # hamiltonian.
-        super().__init__(laserBeams, magField, hamitlonian,
+        super().__init__(laserBeams, magField, hamiltonian,
                          a=a, r0=r0, v0=v0)
 
         self.include_mag_forces = include_mag_forces
         self.svd_eps = svd_eps
+        self.ev_mat = RateEqEvolutionMatrices()
 
         # Check function signatures for any time dependence:
         self.tdepend = {}
         self.tdepend['B'] = False
-        """self.tdepend['pol'] = False
-        self.tdepend['kvec'] = False
-        self.tdepend['det'] = False
-        self.tdepend['intensity'] = False"""
-
-        """if 't' in str(signature(self.magField)):
-            self.tdepend['B'] = True
-        for key in self.laserBeams:
-            for beam in self.laserBeams[key]:
-                if not beam.pol_sig is None and 't' in beam.pol_sig:
-                    self.tdepend['pol'] = True
-                if not beam.kvec_sig is None and 't' in beam.kvec_sig:
-                    self.tdepend['kvec'] = True
-                if not beam.delta_sig is None and 't' in beam.delta_sig:
-                    self.tdepend['det'] = True
-                if not beam.intensity_sig is None and 't' in beam.intensity_sig:
-                    self.tdepend['intensity'] = True"""
 
         # Set up two dictionaries that are useful for both random forces and
         # random recoils:
@@ -160,6 +145,7 @@ class rateeq(governingeq):
 
         # A dictionary to store the pumping rates.
         self.Rijl = {}
+        self.ev_mat.pumping = self.Rijl
 
         # Set up a dictionary to store the profiles.
         self.profile = {}
@@ -227,6 +213,7 @@ class rateeq(governingeq):
             self.Rev_decay[noff:noff+n, moff:moff+m] += \
                         gamma*np.sum(abs2(d_q_block.matrix), axis=0)
 
+        self.ev_mat.decay = self.Rev_decay
         return self.Rev_decay
 
 
@@ -444,7 +431,7 @@ class rateeq(governingeq):
 
         fmag = np.array([0., 0., 0.])
         if self.include_mag_forces:
-            gradBmag = self.magField.gradFieldMag(r)
+            gradBmag = self.magField.magnitude_gradient(r)
 
             for ii, block in enumerate(np.diag(self.hamiltonian.blocks)):
                 ind1 = int(np.sum(self.hamiltonian.ns[:ii]))
@@ -603,7 +590,7 @@ class rateeq(governingeq):
         free_axes = np.bitwise_not(freeze_axis)
 
         if progress_bar:
-            progress = progressBar()
+            progress = Progressbar()
 
         if record_force:
             ts = []
@@ -832,7 +819,7 @@ class rateeq(governingeq):
                                  ['readonly'], ['readonly'], ['readonly']])
 
         if progress_bar:
-            progress = progressBar()
+            progress = Progressbar()
 
         for (x, y, z, vx, vy, vz) in it:
             # Construct the rate equations:

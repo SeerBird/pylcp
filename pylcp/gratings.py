@@ -1,5 +1,5 @@
 import numpy as np
-from pylcp.fields import laserBeams, infinitePlaneWaveBeam, clippedGaussianBeam
+from pylcp.fields import laserBeams, InfinitePlaneWaveBeam, clippedGaussianBeam
 import numba
 
 @numba.njit
@@ -102,7 +102,7 @@ class infiniteGratingMOTBeams(laserBeams):
         else:
             self.eta = eta
 
-        self.add_laser(infinitePlaneWaveBeam(kvec=np.array([0., 0., 1.]),
+        self.add_laser(InfinitePlaneWaveBeam(kvec=np.array([0., 0., 1.]),
                                              pol=pol, s=s, delta=delta,
                                              pol_coord='cartesian', **kwargs))
 
@@ -115,7 +115,7 @@ class infiniteGratingMOTBeams(laserBeams):
             )
 
         for ii in range(self.nr):
-            self.add_laser(infinitePlaneWaveBeam(kvec=kvec_refs[:, ii],
+            self.add_laser(InfinitePlaneWaveBeam(kvec=kvec_refs[:, ii],
                                                  pol=pol_refs[:, ii],
                                                  s=self.eta*s/np.cos(self.thd),
                                                  delta=delta,

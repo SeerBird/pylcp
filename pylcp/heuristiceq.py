@@ -5,12 +5,13 @@ import numba
 from scipy.integrate import solve_ivp
 from scipy.interpolate import interp1d
 from .integration_tools import solve_ivp_random
-from .common import (progressBar, random_vector, spherical_dot,
+from .common import (Progressbar, random_vector, spherical_dot,
                      cart2spherical, spherical2cart)
-from .common import base_force_profile as force_profile
-from .governingeq import governingeq
+from .common import BaseForceProfile as force_profile
+from .governingeq import GoverningEq
+from .typing import TransitionKey
 
-class heuristiceq(governingeq):
+class HeuristicEq(GoverningEq):
     """
     Heuristic force equation
 
@@ -20,23 +21,23 @@ class heuristiceq(governingeq):
 
     Parameters
     ----------
-    laserBeams : dictionary of pylcp.laserBeams, pylcp.laserBeams, or list of pylcp.laserBeam
+    laserBeams : dictionary of pylcp.LaserBeams, pylcp.LaserBeams, or list of pylcp.LaserBeam
         The laserBeams that will be used in constructing the optical Bloch
         equations.  which transitions in the block diagonal hamiltonian.  It can
         be any of the following:
 
-            * A dictionary of pylcp.laserBeams: if this is the case, the keys of
+            * A dictionary of pylcp.LaserBeams: if this is the case, the keys of
               the dictionary should match available :math:`d^{nm}` matrices
-              in the pylcp.hamiltonian object.  The key structure should be
+              in the pylcp.Hamiltonian object.  The key structure should be
               `n->m`.  Here, it must be `g->e`.
-            * pylcp.laserBeams: a single set of laser beams is assumed to
+            * pylcp.LaserBeams: a single set of laser beams is assumed to
               address the transition `g->e`.
-            * a list of pylcp.laserBeam: automatically promoted to a
-              pylcp.laserBeams object assumed to address the transtion `g->e`.
+            * a list of pylcp.LaserBeam: automatically promoted to a
+              pylcp.LaserBeams object assumed to address the transtion `g->e`.
 
-    magField : pylcp.magField or callable
+    magField : pylcp.MagField or callable
         The function or object that defines the magnetic field.
-    hamiltonian : pylcp.hamiltonian
+    hamiltonian : pylcp.Hamiltonian
         The internal hamiltonian of the particle.
     a : array_like, shape (3,), optional
         A default acceleraiton to apply to the particle's motion, usually
@@ -59,11 +60,12 @@ class heuristiceq(governingeq):
         super().__init__(laserBeams, magField, a=a, r0=r0, v0=v0)
 
         # Check to make sure the laserBeams dictionary has only one key:
+        default_tk = TransitionKey('g', 'e')
         for key in self.laserBeams:
-            if key != 'g->e':
+            if key != default_tk:
                 print(key)
                 raise KeyError('laserBeam dictionary should only contain ' +
-                                'a single key of \'g->e\' for the heutisticeq.')
+                               'a single key of TransitionKey("g", "e") for the HeuristicEq.')
 
         # Finally, handle optional arguments:
         self.mass = mass
@@ -79,8 +81,8 @@ class heuristiceq(governingeq):
         # Make some variables to store F, F_laser, and R_sc:
         self.F = np.array([0., 0., 0.])
         self.F_laser = {}
-        self.F_laser['g->e'] = np.zeros((3, self.laserBeams['g->e'].num_of_beams))
-        self.R = np.zeros((self.laserBeams['g->e'].num_of_beams, ))
+        self.F_laser[default_tk] = np.zeros((3, self.laserBeams[default_tk].num_of_beams))
+        self.R = np.zeros((self.laserBeams[default_tk].num_of_beams, ))
 
     def scattering_rate(self, r, v, t, return_kvecs=False):
         """
@@ -105,11 +107,12 @@ class heuristiceq(governingeq):
             transition.
         kvecs : array_like
             If return_kvecs is True, the k-vectors of each of the lasers.  This
-            is used in heuristiceq.force, where it calls this function to
+            is used in HeuristicEq.force, where it calls this function to
             calculate the scattering rate first.  By returning the k-vectors
             with the scattering rates, it prevents the need of having to
             recompute the k-vectors again.
         """
+        default_tk = TransitionKey('g', 'e')
         B = self.magField.Field(r, t)
         Bmag = np.linalg.norm(B)
         if Bmag==0:
@@ -117,10 +120,10 @@ class heuristiceq(governingeq):
         else:
             Bhat = B/np.linalg.norm(B)
 
-        kvecs = self.laserBeams['g->e'].kvec(r, t)
-        intensities = self.laserBeams['g->e'].intensity(r, t)
-        pols = self.laserBeams['g->e'].project_pol(Bhat, r, t)
-        deltas = self.laserBeams['g->e'].delta(t)
+        kvecs = self.laserBeams[default_tk].kvec(r, t)
+        intensities = self.laserBeams[default_tk].intensity(r, t)
+        pols = self.laserBeams[default_tk].project_pol(Bhat, r, t)
+        deltas = self.laserBeams[default_tk].delta(t)
 
         totintensity = np.sum(intensities)
 
@@ -157,13 +160,14 @@ class heuristiceq(governingeq):
             If return_details is True, the forces due to each laser, indexed
             by the manifold the laser addresses.  The dictionary is keyed by
             the transition driven, and individual lasers are in the same order
-            as in the pylcp.laserBeams object used to create the governing
+            as in the pylcp.LaserBeams object used to create the governing
             equation.
         """
+        default_tk = TransitionKey('g', 'e')
         R, kvecs = self.scattering_rate(r, v, t, return_kvecs=True)
 
-        self.F_laser['g->e'] = (kvecs*R[:, np.newaxis]).T
-        self.F = np.sum(self.F_laser['g->e'], axis=1)
+        self.F_laser[default_tk] = (kvecs*R[:, np.newaxis]).T
+        self.F = np.sum(self.F_laser[default_tk], axis=1)
 
         return self.F, self.F_laser
 
@@ -220,7 +224,7 @@ class heuristiceq(governingeq):
         free_axes = np.bitwise_not(freeze_axis)
 
         if progress_bar:
-            progress = progressBar()
+            progress = Progressbar()
 
         def dydt(t, y):
             if progress_bar:
@@ -344,7 +348,7 @@ class heuristiceq(governingeq):
 
         Returns
         -------
-        profile : pylcp.common.base_force_profile
+        profile : pylcp.common.BaseForceProfile
             Resulting force profile.
         """
         if not name:
@@ -358,7 +362,7 @@ class heuristiceq(governingeq):
                                   ['readonly'], ['readonly'], ['readonly']])
 
         if progress_bar:
-            progress = progressBar()
+            progress = Progressbar()
 
         for (x, y, z, vx, vy, vz) in it:
             # Construct the rate equations:

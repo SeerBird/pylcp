@@ -42,32 +42,14 @@ def return_constant_val_t(t, val):
     else:
         return val
 
-def promote_to_lambda(val, var_name='', type='Rt'):
+from .typing import Signature
+
+def promote_to_lambda(val, var_name='', sig=Signature.POSITION_AND_TIME):
     """
     Promotes a constant or callable to a lambda function with proper arguments.
-
-    Parameters
-    ----------
-        val : array_like or callable
-            The value to promote.  Can either be a function, array_like
-            (vector), or a scalar (constant).
-        var_name : str, optional
-            Name of the variable attempting to be promoted.  Useful for error
-            messages. Default: empty string.
-        type : str, optional
-            The arguments of the lambda function we are creating.  If `Rt`,
-            the lambda function returned has ``(R, t)`` as its arguments.  If
-            `t`, it has only `t` as its arguments.  Default: `Rt`.
-
-
-    Returns
-    -------
-        func : callable
-            lambda function created by this function
-        sig : string
-            Either `(R,t)` or `(t)`
     """
-    if type == 'Rt':
+    sig_val = sig.value if isinstance(sig, Signature) else sig
+    if sig_val == 'Rt':
         if not callable(val):
             if isinstance(val, list) or isinstance(val, np.ndarray):
                 func = lambda R=np.array([0., 0., 0.]), t=0.: return_constant_vector(R, t, val)
@@ -90,7 +72,7 @@ def promote_to_lambda(val, var_name='', type='Rt'):
                                 'understood.'% (sig, var_name))
 
         return func, sig
-    elif type == 't':
+    elif sig == 't':
         if not callable(val):
             func = lambda t=0.: return_constant_val_t(t, val)
             sig = '()'
@@ -121,7 +103,7 @@ def return_dx_dy_dz(R, eps):
     return dx, dy, dz
 
 
-class magField(object):
+class MagField(object):
     """
     Base magnetic field class
 
@@ -158,7 +140,7 @@ class magField(object):
             len(response) != 3):
             raise ValueError('Magnetic field function must return a vector.')
 
-    def FieldMag(self, R=np.array([0., 0., 0.]), t=0):
+    def magnitude(self, R=np.array([0., 0., 0.]), t=0):
         """
         Magnetic field magnitude at R and t:
 
@@ -177,7 +159,7 @@ class magField(object):
         """
         return np.linalg.norm(self.Field(R, t))
 
-    def gradFieldMag(self, R=np.array([0., 0., 0.]), t=0):
+    def magnitude_gradient(self, R=np.array([0., 0., 0.]), t=0):
         """
         Gradient of the magnetic field magnitude at R and t:
 
@@ -198,12 +180,12 @@ class magField(object):
         dx, dy, dz = return_dx_dy_dz(R, self.eps)
 
         return np.array([
-            (self.FieldMag(R+dx, t)-self.FieldMag(R-dx, t))/2/self.eps,
-            (self.FieldMag(R+dy, t)-self.FieldMag(R-dy, t))/2/self.eps,
-            (self.FieldMag(R+dz, t)-self.FieldMag(R-dz, t))/2/self.eps
+            (self.magnitude(R + dx, t) - self.magnitude(R - dx, t)) / 2 / self.eps,
+            (self.magnitude(R + dy, t) - self.magnitude(R - dy, t)) / 2 / self.eps,
+            (self.magnitude(R + dz, t) - self.magnitude(R - dz, t)) / 2 / self.eps
             ])
 
-    def gradField(self, R=np.array([0., 0., 0.]), t=0):
+    def gradient(self, R=np.array([0., 0., 0.]), t=0):
         """
         Full spaitial derivative of the magnetic field at R and t:
 
@@ -240,8 +222,8 @@ class magField(object):
             (self.Field(R+dz, t) - self.Field(R-dz, t))/2/self.eps
             ])
 
-class iPMagneticField(magField):
-    """
+class IPMagneticField(MagField):
+    r"""
     Ioffe-Pritchard trap magnetic field
 
     Generates a magnetic field of the form
@@ -270,20 +252,20 @@ class iPMagneticField(magField):
         self.B2 = B2
 
     #Analytical form, not numerical for this and gradField
-    def gradFieldMag(self, R=np.array([0., 0., 0.]), t=0):
+    def magnitude_gradient(self, R=np.array([0., 0., 0.]), t=0):
         a = self.B0
         b = self.B1
         c = self.B2
         x = R[0]
         y = R[1]
         z = R[2]
-        mag = self.FieldMag(R, t)
+        mag = self.magnitude(R, t)
         xcom = 0.5*(2*b**2*x-a*c*x+(c**2)*(x**3)/4+(c**2)*(y**2)*x/4-2*b*c*z*x)/mag
         ycom = 0.5*(2*b**2*(y)-a*c*y+(c**2)*(x**2)*y/4 + (c**2)*(y**3)/4+2*b*c*z*y)/mag
         zcom = 0.5*(0-b*c*(x**2)+b*c*(y**2)+2*a*c*z+(c**2)*(z**3))/mag
         return np.array([xcom, ycom, zcom])
 
-    def gradField(self, R=np.array([0., 0., 0.]), t=0):
+    def gradient(self, R=np.array([0., 0., 0.]), t=0):
         B0 = self.B0
         B1 = self.B1
         B2 = self.B2
@@ -301,8 +283,8 @@ class iPMagneticField(magField):
             ])
 
 
-class constantMagneticField(magField):
-    """
+class ConstantMagneticField(MagField):
+    r"""
     Spatially constant magnetic field
 
     Represents a magnetic field of the form
@@ -321,7 +303,7 @@ class constantMagneticField(magField):
         self.constant_grad_field_mag = np.zeros((3,))
         self.constant_grad_field = np.zeros((3,3))
 
-    def gradFieldMag(self, R=np.array([0., 0., 0.]), t=0):
+    def magnitude_gradient(self, R=np.array([0., 0., 0.]), t=0):
         """
         Gradient of the magnetic field magnitude at R and t:
 
@@ -340,7 +322,7 @@ class constantMagneticField(magField):
         """
         return self.constant_grad_field_mag
 
-    def gradField(self, R=np.array([0., 0., 0.]), t=0):
+    def gradient(self, R=np.array([0., 0., 0.]), t=0):
         """
         Gradient of the magnetic field magnitude at R and t:
 
@@ -361,7 +343,7 @@ class constantMagneticField(magField):
         return self.constant_grad_field
 
 
-class quadrupoleMagneticField(magField):
+class QuadrupoleMagneticField(MagField):
     """
     Spherical quadrupole  magnetic field
 
@@ -382,7 +364,7 @@ class quadrupoleMagneticField(magField):
         self.constant_grad_field = alpha*\
             np.array([[-0.5, 0., 0.], [0., -0.5, 0.], [0., 0., 1.]])
 
-    def gradField(self, R=np.array([0., 0., 0.]), t=0):
+    def gradient(self, R=np.array([0., 0., 0.]), t=0):
         """
         Full spaitial derivative of the magnetic field at R and t:
 
@@ -411,7 +393,7 @@ class quadrupoleMagneticField(magField):
 
 
 # First, define the laser beam class:
-class laserBeam(object):
+class LaserBeam(object):
     """
     The base class for a single laser beam
 
@@ -488,7 +470,7 @@ class laserBeam(object):
 
         # Promote it to a lambda func:
         if not delta is None:
-            self.delta, self.delta_sig = promote_to_lambda(delta, var_name='delta', type='t')
+            self.delta, self.delta_sig = promote_to_lambda(delta, var_name='delta', sig='t')
 
         if self.delta_sig == '(t)':
             self.delta_phase = parallelIntegrator(self.delta)
@@ -497,7 +479,7 @@ class laserBeam(object):
 
         # Promote it to a lambda func:
         if not phase is None:
-            self.phase, self.phase_sig = promote_to_lambda(phase, var_name='phase', type='t')
+            self.phase, self.phase_sig = promote_to_lambda(phase, var_name='phase', sig='t')
 
         self.eps = eps
 
@@ -940,7 +922,7 @@ class laserBeam(object):
         return delEq
 
 
-class infinitePlaneWaveBeam(laserBeam):
+class InfinitePlaneWaveBeam(LaserBeam):
     """
     Infinte plane wave beam
 
@@ -1018,7 +1000,7 @@ class infinitePlaneWaveBeam(laserBeam):
         return delEq
 
 
-class gaussianBeam(laserBeam):
+class GaussianBeam(LaserBeam):
     """
     Collimated Gaussian beam
 
@@ -1093,7 +1075,7 @@ class gaussianBeam(laserBeam):
         return self.s_max*np.exp(-2*rho_sq/self.wb**2)
 
 
-class clippedGaussianBeam(gaussianBeam):
+class ClippedGaussianBeam(GaussianBeam):
     """
     Clipped, collimated Gaussian beam
 
@@ -1146,7 +1128,7 @@ class clippedGaussianBeam(gaussianBeam):
         return self.s_max*np.exp(-2*rho_sq/self.wb**2)*(np.sqrt(rho_sq)<self.rs)
 
 
-class laserBeams(object):
+class LaserBeams(object):
     """
     The base class for a collection of laser beams
 
@@ -1160,7 +1142,7 @@ class laserBeams(object):
         Type of beam to use in the collection of laserBeams.  By default
         `beam_type=laserBeam`.
     """
-    def __init__(self, laserbeamparams=None, beam_type=laserBeam):
+    def __init__(self, laserbeamparams=None, beam_type=LaserBeam):
         if laserbeamparams is not None:
             if not isinstance(laserbeamparams, list):
                 raise ValueError('laserbeamparams must be a list.')
@@ -1168,7 +1150,7 @@ class laserBeams(object):
             for laserbeamparam in laserbeamparams:
                 if isinstance(laserbeamparam, dict):
                     self.beam_vector.append(beam_type(**laserbeamparam))
-                elif isinstance(laserbeamparam, laserBeam):
+                elif isinstance(laserbeamparam, LaserBeam):
                     self.beam_vector.append(laserbeamparam)
                 else:
                     raise TypeError('Each element of laserbeamparams must either ' +
@@ -1187,7 +1169,7 @@ class laserBeams(object):
         return self
 
     def __add__(self, other):
-        return laserBeams(self.beam_vector + other.beam_vector)
+        return LaserBeams(self.beam_vector + other.beam_vector)
 
     def add_laser(self, new_laser):
         """
@@ -1197,11 +1179,11 @@ class laserBeams(object):
         ----------
         new_laser : laserBeam or laserBeam subclass
         """
-        if isinstance(new_laser, laserBeam):
+        if isinstance(new_laser, LaserBeam):
             self.beam_vector.append(new_laser)
             self.num_of_beams = len(self.beam_vector)
         elif isinstance(new_laser, dict):
-            self.beam_vector.append(laserBeam(**new_laser))
+            self.beam_vector.append(LaserBeam(**new_laser))
         else:
             raise TypeError('new_laser should by type laserBeam or a dictionary' +
                             'of arguments to initialize the laserBeam class.')
@@ -1519,7 +1501,7 @@ class laserBeams(object):
         return [beam.polarization_ellipse(xp, yp, R, t) for beam in self.beam_vector]
 
 
-class conventional3DMOTBeams(laserBeams):
+class Conventional3DMOTBeams(LaserBeams):
     """
     A collection of laser beams for 6-beam MOT
 
@@ -1538,13 +1520,13 @@ class conventional3DMOTBeams(laserBeams):
         List of angles to define a rotated MOT.  Default: [0., 0., 0.]
     rotation_spec : str
         String to define the convention of the Euler rotations.  Default: 'ZYZ'
-    beam_type : pylcp.laserBeam or subclass
+    beam_type : pylcp.LaserBeam or subclass
         Type of beam to generate.
     **kwargs :
         other keyword arguments to pass to beam_type
     """
     def __init__(self, k=1, pol=+1, rotation_angles=[0., 0., 0.],
-                 rotation_spec='ZYZ', beam_type=laserBeam, **kwargs):
+                 rotation_spec='ZYZ', beam_type=LaserBeam, **kwargs):
         super().__init__()
 
         rot_mat = Rotation.from_euler(rotation_spec, rotation_angles).as_matrix()
@@ -1561,12 +1543,12 @@ class conventional3DMOTBeams(laserBeams):
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
 
-    test_field = magField(lambda R: np.array([-0.5*R[0], -0.5*R[1], 1*R[2]]))
+    test_field = MagField(lambda R: np.array([-0.5*R[0], -0.5*R[1], 1*R[2]]))
 
     print(test_field.Field())
-    print(test_field.gradField(np.array([5., 2., 1.])))
+    print(test_field.gradient(np.array([5., 2., 1.])))
 
-    example_beams = laserBeams([
+    example_beams = LaserBeams([
         {'kvec':np.array([0., 0., 1.]), 'pol':np.array([0., 0., 1.]),
          'pol_coord':'spherical', 'delta':-2, 's': 1.},
         {'kvec':np.array([0., 0., -1.]), 'pol':np.array([0., 0., 1.]),
@@ -1580,7 +1562,7 @@ if __name__ == '__main__':
     print(example_beams.intensity())
     print(example_beams.electric_field_gradient(np.array([0., 0., 0.]), 0.5))
 
-    example_beams_2 = laserBeams([
+    example_beams_2 = LaserBeams([
         {'kvec':np.array([0., 0., 1.]), 'pol':np.array([0., 0., 1.]),
          'pol_coord':'spherical', 'delta':-2, 's': lambda R: 1.},
         {'kvec':np.array([0., 0., -1.]), 'pol':np.array([0., 0., 1.]),
@@ -1589,15 +1571,15 @@ if __name__ == '__main__':
 
     print(example_beams_2.electric_field_gradient(np.array([0., 0., 0.]), 0.5))
 
-    example_beam = gaussianBeam(np.array([1., 0., 0.]), +1, 5, -2, 1000)
+    example_beam = GaussianBeam(np.array([1., 0., 0.]), +1, 5, -2, 1000)
     print(example_beam.s(np.array([0., 1000/np.sqrt(2), 1000/np.sqrt(2)])))
 
-    example_beam = infinitePlaneWaveBeam(np.array([1., 0., 0.]), +1, 5, -2)
+    example_beam = InfinitePlaneWaveBeam(np.array([1., 0., 0.]), +1, 5, -2)
     print(example_beam.electric_field_gradient(np.array([0., 0., 0.]), 0.))
 
     R = np.random.rand(3, 101)
     t = np.linspace(0, 10, 101)
     print(example_beam.electric_field_gradient(R, t).shape)
 
-    MOT_beams = conventional3DMOTBeams(-2, 1, beam_type=gaussianBeam, wb=1000)
+    MOT_beams = Conventional3DMOTBeams(-2, 1, beam_type=GaussianBeam, wb=1000)
     MOT_beams.beam_vector[1].kvec()

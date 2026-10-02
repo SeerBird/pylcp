@@ -61,7 +61,7 @@ def test_dqij_two_bare_hyperfine_comparison():
     np.testing.assert_allclose(dq_up, dq_fk)
 
 def test_hamiltonian_object_comparison():
-    """Compare constructed hamiltonian object properties."""
+    """Compare constructed Hamiltonian object properties."""
     H0_g_up, muq_g_up = upstream.hamiltonians.singleF(F=0, gF=1.0)
     H0_e_up, muq_e_up = upstream.hamiltonians.singleF(F=1, gF=1.0)
     dqij_up = upstream.hamiltonians.dqij_two_bare_hyperfine(F=0, Fp=1, normalize=True)
@@ -70,7 +70,7 @@ def test_hamiltonian_object_comparison():
     H0_g_fk, muq_g_fk = fork.hamiltonians.singleF(F=0, gF=1.0)
     H0_e_fk, muq_e_fk = fork.hamiltonians.singleF(F=1, gF=1.0)
     dqij_fk = fork.hamiltonians.dqij_two_bare_hyperfine(F=0, Fp=1, normalize=True)
-    H_fk = fork.hamiltonian(H0_g_fk, H0_e_fk, muq_g_fk, muq_e_fk, dqij_fk, mass=87.0)
+    H_fk = fork.Hamiltonian(H0_g_fk, H0_e_fk, muq_g_fk, muq_e_fk, dqij_fk, mass=87.0)
 
     np.testing.assert_array_equal(H_up.ns, H_fk.ns)
     assert H_up.n == H_fk.n
