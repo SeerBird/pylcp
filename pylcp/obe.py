@@ -41,11 +41,11 @@ def cartesian_vector_tensor_dot(a, B):
         return np.sum(a[np.newaxis, ...]*B[...], axis=1)
 
 
-class force_profile(BaseForceProfile):
+class ForceProfile(BaseForceProfile):
     """
     Optical Bloch equation force profile
 
-    The force profile object stores all of the calculated quantities created by
+    The force profile object stores all the calculated quantities created by
     the rateeq.generate_force_profile() method.  It has the following
     attributes:
 
@@ -118,11 +118,11 @@ class OBE(GoverningEq):
     hamiltonian : pylcp.Hamiltonian
         The internal hamiltonian of the particle.
     a : array_like, shape (3,), optional
-        A default acceleraiton to apply to the particle's motion, usually
+        A default acceleration to apply to the particle's motion, usually
         gravity. Default: [0., 0., 0.]
     transform_into_re_im : boolean
         Optional flag to transform the optical Bloch equations into real and
-        imaginary components.  This helps to decrease computaiton time as it
+        imaginary components.  This helps to decrease computation time as it
         uses the symmetry :math:`\\rho_{ji}=\\rho_{ij}^*` to cut the number
         of equations nearly in half.  Default: True
     use_sparse_matrices : boolean or None
@@ -132,7 +132,7 @@ class OBE(GoverningEq):
         matrix.  At that size, there may be some speed up with sparse matrices.
         Default: None
     include_mag_forces : boolean
-        Optional flag to inculde magnetic forces in the force calculation.
+        Optional flag to include magnetic forces in the force calculation.
         Default: True
     r0 : array_like, shape (3,), optional
         Initial position.  Default: [0., 0., 0.]
@@ -1161,7 +1161,7 @@ class OBE(GoverningEq):
 
         Returns
         -------
-        profile : pylcp.obe.force_profile
+        profile : pylcp.obe.ForceProfile
             Resulting force profile.
         """
         def default_deltat(r, v, deltat_v, deltat_r, deltat_tmax):
@@ -1193,7 +1193,7 @@ class OBE(GoverningEq):
         if not name:
             name = '{0:d}'.format(len(self.profile))
 
-        self.profile[name] = force_profile(R, V, self.laserBeams, self.hamiltonian)
+        self.profile[name] = ForceProfile(R, V, self.laserBeams, self.hamiltonian)
 
         it = np.nditer([R[0], R[1], R[2], V[0], V[1], V[2]],
                        flags=['refs_ok', 'multi_index'],

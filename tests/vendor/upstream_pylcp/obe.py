@@ -1160,7 +1160,7 @@ class obe(governingeq):
 
         Returns
         -------
-        profile : pylcp.obe.force_profile
+        profile : pylcp.obe.ForceProfile
             Resulting force profile.
         """
         def default_deltat(r, v, deltat_v, deltat_r, deltat_tmax):

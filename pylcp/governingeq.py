@@ -33,7 +33,7 @@ class GoverningEq(object):
     hamiltonian : pylcp.Hamiltonian or None
         The internal hamiltonian of the particle.
     a : array_like, shape (3,), optional
-        A default acceleraiton to apply to the particle's motion, usually
+        A default acceleration to apply to the particle's motion, usually
         gravity. Default: [0., 0., 0.]
     r0 : array_like, shape (3,)
         Initial position.  Default: [0.,0.,0.]

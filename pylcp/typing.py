@@ -1,13 +1,34 @@
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Union, Iterator
+from typing import Any, Union, Iterator, Literal
 import numpy as np
+
+Vector3D = np.ndarray[tuple[Literal[3], ...], np.dtype[np.float64] | np.dtype[np.complex128]]
+InputVector3D = Vector3D | tuple[float, float, float] | list[float]
+
+
+def validate_input_3vector_and_cast_to_ndarray(vector: InputVector3D):
+    not3_error = ValueError("A 3D vector needs to have 3 components")
+    # TODO: validate components
+    # TODO: consider functional typing? maybe by accessing the 3 components
+    if isinstance(vector, np.ndarray):
+        if vector.shape[0] != 3:
+            raise not3_error
+        return vector
+    elif isinstance(vector, tuple | list):
+        if len(vector) != 3:
+            raise not3_error
+        return np.asarray(vector)
+    else:
+        raise TypeError("3-vector should be an ndarray, tuple, or list")
+
 
 class Signature(Enum):
     """Function argument signatures used for field promotion and lambdas."""
     POSITION_AND_TIME = "Rt"
     TIME_ONLY = "t"
     POSITION_ONLY = "R"
+
 
 @dataclass(frozen=True, slots=True)
 class TransitionKey:
@@ -21,9 +42,11 @@ class TransitionKey:
     @classmethod
     def from_string(cls, key_str: str) -> "TransitionKey":
         if "->" not in key_str:
-            raise ValueError(f"Invalid transition key string format: '{key_str}'. Expected 'ground->excited'.")
+            raise ValueError(
+                f"Invalid transition key string format: '{key_str}'. Expected 'ground->excited'.")
         g, e = key_str.split("->", 1)
         return cls(ground=g, excited=e)
+
 
 @dataclass
 class OBEEvolutionMatrices:
@@ -87,7 +110,8 @@ class OBEEvolutionMatrices:
             raise KeyError(f"Cannot delete key '{key}' from OBEEvolutionMatrices")
 
     def __contains__(self, key: str) -> bool:
-        valid_keys = {"decay", "H0", "h0", "B", "magnetic", "reE", "re_electric", "imE", "im_electric", "d_q", "d_q*", "d_q_conj"}
+        valid_keys = {"decay", "H0", "h0", "B", "magnetic", "reE", "re_electric", "imE",
+                      "im_electric", "d_q", "d_q*", "d_q_conj"}
         return key in valid_keys
 
     def keys(self) -> list[str]:
@@ -104,6 +128,7 @@ class OBEEvolutionMatrices:
 
     def __iter__(self) -> Iterator[str]:
         return iter(self.keys())
+
 
 @dataclass
 class RateEqEvolutionMatrices:

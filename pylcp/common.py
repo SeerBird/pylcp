@@ -1,6 +1,11 @@
 import time
 import copy
+from typing import TYPE_CHECKING
+
 import numpy as np
+if TYPE_CHECKING:
+    from pylcp import Hamiltonian
+
 
 class Progressbar(object):
     def __init__(self, decimals=1, fill='█', prefix='Progress:',
@@ -76,7 +81,7 @@ class BaseForceProfile:
     """
     Base force profile
 
-    The force profile object stores all of the calculated quantities created by
+    The force profile object stores all the calculated quantities created by
     the governingeq.generate_force_profile() method.  It has the following
     attributes:
 
@@ -98,7 +103,7 @@ class BaseForceProfile:
     Neq : array_like
         Equilibrium population found.
     """
-    def __init__(self, R, V, laserBeams, hamiltonian):
+    def __init__(self, R, V, laserBeams, hamiltonian:Hamiltonian):
         if not isinstance(R, np.ndarray):
             R = np.array(R)
         if not isinstance(V, np.ndarray):
@@ -113,7 +118,7 @@ class BaseForceProfile:
         if hamiltonian is None:
             self.Neq = None
         else:
-            self.Neq = np.zeros(R[0].shape + (hamiltonian.n,))
+            self.Neq = np.zeros(R.shape[1:] + (hamiltonian.n,))
 
         self.f = {}
         for key in laserBeams:
@@ -134,7 +139,6 @@ class BaseForceProfile:
                 self.f[key][(jj,) + ind] = F_laser[key][jj]
 
             self.f_mag[(jj,) + ind] = F_mag[jj]
-
 
 def random_vector(rng, free_axes=None):
     """
@@ -172,3 +176,4 @@ def random_vector(rng, free_axes=None):
                          np.cos(th)])
     else:
         raise ValueError('free_axes must be a boolean array of length 3.')
+

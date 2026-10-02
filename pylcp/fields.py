@@ -6,50 +6,57 @@ from scipy.spatial.transform import Rotation
 
 import numba
 
+
 @numba.njit
 def dot2D(a, b):
     c = np.zeros((a.shape[1],), dtype=a.dtype)
     for ii in range(a.shape[1]):
-        c[ii] = np.sum(a[:, ii]*b[:, ii])
+        c[ii] = np.sum(a[:, ii] * b[:, ii])
     return c
+
 
 @numba.njit
 def electric_field(r, t, amp, pol, k, phase):
-    return pol*amp*np.exp(-1j*(k[0]*r[0]+k[1]*r[1]+k[2]*r[2]) + 1j*phase)
+    return pol * amp * np.exp(-1j * (k[0] * r[0] + k[1] * r[1] + k[2] * r[2]) + 1j * phase)
 
 
 def return_constant_val(R, t, val):
-    if R.shape==(3,):
+    if R.shape == (3,):
         return val
     elif R.shape[0] == 3:
-        return val*np.ones(R[0].shape)
+        return val * np.ones(R[0].shape)
     else:
         raise ValueError('The first dimension of R should have length 3, ' +
-                         'not %d.'%R.shape[0])
+                         'not %d.' % R.shape[0])
+
 
 def return_constant_vector(R, t, vector):
-    if R.shape==(3,):
+    if R.shape == (3,):
         return vector
     elif R.shape[0] == 3:
         return np.outer(vector, np.ones(R[0].shape))
     else:
         raise ValueError('The first dimension of R should have length 3, ' +
-                         'not %d.'% R.shape[0])
+                         'not %d.' % R.shape[0])
+
 
 def return_constant_val_t(t, val):
     if isinstance(t, np.ndarray):
-        return val*np.ones(t.shape)
+        return val * np.ones(t.shape)
     else:
         return val
 
+
 from .typing import Signature
 
-def promote_to_lambda(val, var_name='', sig=Signature.POSITION_AND_TIME):
+
+def promote_to_lambda(val, var_name='', sig: Signature = Signature.POSITION_AND_TIME):
     """
     Promotes a constant or callable to a lambda function with proper arguments.
     """
-    sig_val = sig.value if isinstance(sig, Signature) else sig
-    if sig_val == 'Rt':
+    # TODO: decide if maybe forcing the user to make an R,t function would be better if this isn't
+    #  optimized either way
+    if sig == Signature.POSITION_AND_TIME:
         if not callable(val):
             if isinstance(val, list) or isinstance(val, np.ndarray):
                 func = lambda R=np.array([0., 0., 0.]), t=0.: return_constant_vector(R, t, val)
@@ -68,11 +75,11 @@ def promote_to_lambda(val, var_name='', sig=Signature.POSITION_AND_TIME):
                 func = lambda R=np.array([0., 0., 0.]), t=0.: val(t)
                 sig = '(R, t)'
             else:
-                raise TypeError('Signature [%s] of function %s not'+
-                                'understood.'% (sig, var_name))
+                raise TypeError('Signature [%s] of function %s not' +
+                                'understood.' % (sig, var_name))
 
         return func, sig
-    elif sig == 't':
+    elif sig == Signature.TIME_ONLY:
         if not callable(val):
             func = lambda t=0.: return_constant_val_t(t, val)
             sig = '()'
@@ -81,10 +88,11 @@ def promote_to_lambda(val, var_name='', sig=Signature.POSITION_AND_TIME):
             if '(t)' in sig:
                 func = lambda t=0.: val(t)
             else:
-                raise TypeError('Signature [%s] of function %s not '+
-                                'understood.'% (sig, var_name))
+                raise TypeError('Signature [%s] of function %s not ' +
+                                'understood.' % (sig, var_name))
 
         return func, sig
+
 
 def return_dx_dy_dz(R, eps):
     if R.shape == (3,):
@@ -126,10 +134,11 @@ class MagField(object):
     eps : float
         small epsilon used for computing derivatives
     """
+
     def __init__(self, field, eps=1e-5):
         self.eps = eps
 
-        R = np.random.rand(3) # Pick a random point for testing
+        R = np.random.rand(3)  # Pick a random point for testing
 
         # Promote it to a lambda func:
         self.Field, self.FieldSig = promote_to_lambda(field, var_name='for field')
@@ -137,7 +146,7 @@ class MagField(object):
         # Try it out:
         response = self.Field(R, 0.)
         if (isinstance(response, float) or isinstance(response, int) or
-            len(response) != 3):
+                len(response) != 3):
             raise ValueError('Magnetic field function must return a vector.')
 
     def magnitude(self, R=np.array([0., 0., 0.]), t=0):
@@ -183,7 +192,7 @@ class MagField(object):
             (self.magnitude(R + dx, t) - self.magnitude(R - dx, t)) / 2 / self.eps,
             (self.magnitude(R + dy, t) - self.magnitude(R - dy, t)) / 2 / self.eps,
             (self.magnitude(R + dz, t) - self.magnitude(R - dz, t)) / 2 / self.eps
-            ])
+        ])
 
     def gradient(self, R=np.array([0., 0., 0.]), t=0):
         """
@@ -217,10 +226,11 @@ class MagField(object):
         dx, dy, dz = return_dx_dy_dz(R, self.eps)
 
         return np.array([
-            (self.Field(R+dx, t) - self.Field(R-dx, t))/2/self.eps,
-            (self.Field(R+dy, t) - self.Field(R-dy, t))/2/self.eps,
-            (self.Field(R+dz, t) - self.Field(R-dz, t))/2/self.eps
-            ])
+            (self.Field(R + dx, t) - self.Field(R - dx, t)) / 2 / self.eps,
+            (self.Field(R + dy, t) - self.Field(R - dy, t)) / 2 / self.eps,
+            (self.Field(R + dz, t) - self.Field(R - dz, t)) / 2 / self.eps
+        ])
+
 
 class IPMagneticField(MagField):
     r"""
@@ -245,13 +255,16 @@ class IPMagneticField(MagField):
     It is currently missing extra terms that are required for it to fulfill
     Maxwell's equations at second order.
     """
-    def __init__(self, B0, B1, B2, eps = 1e-5):
-        super().__init__(lambda R, t: np.array([B1*R[0]-B2*R[0]*R[2]/2, -R[1]*B1-B2*R[1]*R[2]/2, B0+B2/2*(R[2]**2 - (R[0]**2+R[1]**2)/2)]))
+
+    def __init__(self, B0, B1, B2, eps=1e-5):
+        super().__init__(lambda R, t: np.array(
+            [B1 * R[0] - B2 * R[0] * R[2] / 2, -R[1] * B1 - B2 * R[1] * R[2] / 2,
+             B0 + B2 / 2 * (R[2] ** 2 - (R[0] ** 2 + R[1] ** 2) / 2)]))
         self.B0 = B0
         self.B1 = B1
         self.B2 = B2
 
-    #Analytical form, not numerical for this and gradField
+    # Analytical form, not numerical for this and gradField
     def magnitude_gradient(self, R=np.array([0., 0., 0.]), t=0):
         a = self.B0
         b = self.B1
@@ -260,9 +273,12 @@ class IPMagneticField(MagField):
         y = R[1]
         z = R[2]
         mag = self.magnitude(R, t)
-        xcom = 0.5*(2*b**2*x-a*c*x+(c**2)*(x**3)/4+(c**2)*(y**2)*x/4-2*b*c*z*x)/mag
-        ycom = 0.5*(2*b**2*(y)-a*c*y+(c**2)*(x**2)*y/4 + (c**2)*(y**3)/4+2*b*c*z*y)/mag
-        zcom = 0.5*(0-b*c*(x**2)+b*c*(y**2)+2*a*c*z+(c**2)*(z**3))/mag
+        xcom = 0.5 * (2 * b ** 2 * x - a * c * x + (c ** 2) * (x ** 3) / 4 + (c ** 2) * (
+                y ** 2) * x / 4 - 2 * b * c * z * x) / mag
+        ycom = 0.5 * (2 * b ** 2 * (y) - a * c * y + (c ** 2) * (x ** 2) * y / 4 + (c ** 2) * (
+                y ** 3) / 4 + 2 * b * c * z * y) / mag
+        zcom = 0.5 * (0 - b * c * (x ** 2) + b * c * (y ** 2) + 2 * a * c * z + (c ** 2) * (
+                z ** 3)) / mag
         return np.array([xcom, ycom, zcom])
 
     def gradient(self, R=np.array([0., 0., 0.]), t=0):
@@ -272,15 +288,15 @@ class IPMagneticField(MagField):
         x = R[0]
         y = R[1]
         z = R[2]
-        xcom = np.array([B1-B2*z/2, 0, -B2*x/2])
-        ycom = np.array([0, -B1-B2*z/2, B2*y/2])
-        zcom = np.array([-B2*x/2, -B2*y/2, B2*z])
+        xcom = np.array([B1 - B2 * z / 2, 0, -B2 * x / 2])
+        ycom = np.array([0, -B1 - B2 * z / 2, B2 * y / 2])
+        zcom = np.array([-B2 * x / 2, -B2 * y / 2, B2 * z])
 
         return np.array([
-            np.array([B1-B2*z/2, 0, -B2*x/2]),
-            np.array([0, -B1-B2*z/2, B2*y/2]),
-            np.array([-B2*x/2, -B2*y/2, B2*z])
-            ])
+            np.array([B1 - B2 * z / 2, 0, -B2 * x / 2]),
+            np.array([0, -B1 - B2 * z / 2, B2 * y / 2]),
+            np.array([-B2 * x / 2, -B2 * y / 2, B2 * z])
+        ])
 
 
 class ConstantMagneticField(MagField):
@@ -297,11 +313,12 @@ class ConstantMagneticField(MagField):
     val : array_like with shape (3,)
         The three-vector defintion of the constant magnetic field.
     """
+
     def __init__(self, B0):
         super().__init__(lambda R, t: B0)
 
         self.constant_grad_field_mag = np.zeros((3,))
-        self.constant_grad_field = np.zeros((3,3))
+        self.constant_grad_field = np.zeros((3, 3))
 
     def magnitude_gradient(self, R=np.array([0., 0., 0.]), t=0):
         """
@@ -357,12 +374,13 @@ class QuadrupoleMagneticField(MagField):
     alpha : float
         strength of the magnetic field gradient.
     """
+
     def __init__(self, alpha, eps=1e-5):
-        super().__init__(lambda R, t: alpha*np.array([-0.5*R[0], -0.5*R[1], R[2]]))
+        super().__init__(lambda R, t: alpha * np.array([-0.5 * R[0], -0.5 * R[1], R[2]]))
         self.alpha = alpha
 
-        self.constant_grad_field = alpha*\
-            np.array([[-0.5, 0., 0.], [0., -0.5, 0.], [0., 0., 1.]])
+        self.constant_grad_field = alpha * \
+                                   np.array([[-0.5, 0., 0.], [0., -0.5, 0.], [0., 0., 1.]])
 
     def gradient(self, R=np.array([0., 0., 0.]), t=0):
         """
@@ -391,7 +409,6 @@ class QuadrupoleMagneticField(MagField):
         return self.constant_grad_field
 
 
-
 # First, define the laser beam class:
 class LaserBeam(object):
     """
@@ -399,7 +416,7 @@ class LaserBeam(object):
 
     Attempts to represent a laser beam as
 
-    .. math::
+    . math::
         \\frac{1}{2}\\hat{\\boldsymbol{\\epsilon}}(r, t) E_0(r, t)
         e^{i\\mathbf{k}(r,t)\\cdot\\mathbf{r}-i \\int dt\\Delta(t) + i\\phi(r, t)}
 
@@ -451,6 +468,7 @@ class LaserBeam(object):
     phase : float
         Overall phase of the laser beam.
     """
+
     def __init__(self, kvec=None, s=None, pol=None, delta=None,
                  phase=0., pol_coord='spherical', eps=1e-5):
         # Promote it to a lambda func:
@@ -470,16 +488,16 @@ class LaserBeam(object):
 
         # Promote it to a lambda func:
         if not delta is None:
-            self.delta, self.delta_sig = promote_to_lambda(delta, var_name='delta', sig='t')
+            self.delta, self.delta_sig = promote_to_lambda(delta, var_name='delta', sig=Signature.TIME_ONLY)
 
         if self.delta_sig == '(t)':
             self.delta_phase = parallelIntegrator(self.delta)
         elif self.delta_sig == '()':
-            self.delta_phase = lambda t: delta*t
+            self.delta_phase = lambda t: delta * t
 
         # Promote it to a lambda func:
         if not phase is None:
-            self.phase, self.phase_sig = promote_to_lambda(phase, var_name='phase', sig='t')
+            self.phase, self.phase_sig = promote_to_lambda(phase, var_name='phase', sig=Signature.TIME_ONLY)
 
         self.eps = eps
 
@@ -492,7 +510,7 @@ class LaserBeam(object):
             # relatively simple as there is only one angle.
 
             # Set the polarization in this direction:
-            if np.sign(pol)<0:
+            if np.sign(pol) < 0:
                 self.pol = np.array([1., 0., 0.], dtype='complex')
             else:
                 self.pol = np.array([0., 0., 1.], dtype='complex')
@@ -501,7 +519,7 @@ class LaserBeam(object):
             self.pol, self.pol_sig = promote_to_lambda(self.pol, var_name='polarization')
 
             # Project onto the actual k-vector:
-            self.pol = self.project_pol(self.kvec()/np.linalg.norm(self.kvec()),
+            self.pol = self.project_pol(self.kvec() / np.linalg.norm(self.kvec()),
                                         invert=True).astype('complex128')
 
         elif isinstance(pol, np.ndarray):
@@ -510,7 +528,7 @@ class LaserBeam(object):
 
             # The user has specified a single polarization vector in
             # cartesian coordinates:
-            if pol_coord=='cartesian':
+            if pol_coord == 'cartesian':
                 # Check for transverseness:
                 if np.abs(np.dot(self.kvec(), pol)) > 1e-9:
                     raise ValueError("I'm sorry; light is a transverse wave")
@@ -520,7 +538,7 @@ class LaserBeam(object):
 
             # The user has specified a single polarization vector in
             # spherical basis:
-            elif pol_coord=='spherical':
+            elif pol_coord == 'spherical':
                 pol_cart = spherical2cart(pol)
 
                 # Check for transverseness:
@@ -531,12 +549,11 @@ class LaserBeam(object):
                 self.pol = pol.astype('complex128')
 
             # Finally, normalize
-            self.pol = self.pol/np.linalg.norm(self.pol)
+            self.pol = self.pol / np.linalg.norm(self.pol)
         else:
             raise ValueError("pol must be +1, -1, or a numpy array")
 
         return self.pol
-
 
     def kvec(self, R=np.array([0., 0., 0.]), t=0.):
         """
@@ -614,7 +631,7 @@ class LaserBeam(object):
         pass
 
     # TODO: add testing of kvec/pol orthogonality.
-    def project_pol(self, quant_axis, R=np.array([0., 0., 0.]), t=0,
+    def project_pol(self, quant_axis: np.ndarray, R=np.array([0., 0., 0.]), t=0,
                     treat_nans=False, calculate_norm=False, invert=False):
         """
         Project the polarization onto a quantization axis.
@@ -653,13 +670,13 @@ class LaserBeam(object):
             quant_axis[2] = 1.0  # Make the third entry all ones.
             quant_axis_norm = np.linalg.norm(quant_axis, axis=0)
             for ii in range(3):
-                quant_axis2[ii][quant_axis_norm!=0] = \
-                    quant_axis2[ii][quant_axis_norm!=0]/\
-                    quant_axis_norm[quant_axis_norm!=0]
-            quant_axis=quant_axis2
+                quant_axis2[ii][quant_axis_norm != 0] = \
+                    quant_axis2[ii][quant_axis_norm != 0] / \
+                    quant_axis_norm[quant_axis_norm != 0]
+            quant_axis = quant_axis2
         elif treat_nans:
             for ii in range(quant_axis.shape[0]):
-                if ii<quant_axis.shape[0]-1:
+                if ii < quant_axis.shape[0] - 1:
                     quant_axis[ii][np.isnan(quant_axis[-1])] = 0.0
                 else:
                     quant_axis[ii][np.isnan(quant_axis[-1])] = 1.0
@@ -671,34 +688,34 @@ class LaserBeam(object):
         # meaning for the rate equations (where we expect this method to
         # mostly be used.)  Thus, we just set that angle equal to zero here.
         cosbeta = quant_axis[2]
-        sinbeta = np.sqrt(1-cosbeta**2)
+        sinbeta = np.sqrt(1 - cosbeta ** 2)
         if isinstance(cosbeta, (float, int)):
-            if np.abs(cosbeta)<1:
+            if np.abs(cosbeta) < 1:
                 gamma = np.arctan2(quant_axis[1], quant_axis[0])
             else:
                 gamma = 0
             alpha = 0
         else:
             gamma = np.zeros(cosbeta.shape)
-            inds = np.abs(quant_axis[2])<1
+            inds = np.abs(quant_axis[2]) < 1
             gamma[inds] = np.arctan2(quant_axis[1][inds],
-                                         quant_axis[0][inds])
+                                     quant_axis[0][inds])
             alpha = np.zeros(cosbeta.shape)
 
         quant_axis = quant_axis.astype('float64')
         pol = pol.astype('complex128')
 
         D = np.array([
-            [(1+cosbeta)/2*np.exp(-1j*alpha + 1j*gamma),
-             -sinbeta/np.sqrt(2)*np.exp(-1j*alpha),
-             (1-cosbeta)/2*np.exp(-1j*alpha - 1j*gamma)],
-            [sinbeta/np.sqrt(2)*np.exp(1j*gamma),
+            [(1 + cosbeta) / 2 * np.exp(-1j * alpha + 1j * gamma),
+             -sinbeta / np.sqrt(2) * np.exp(-1j * alpha),
+             (1 - cosbeta) / 2 * np.exp(-1j * alpha - 1j * gamma)],
+            [sinbeta / np.sqrt(2) * np.exp(1j * gamma),
              cosbeta,
-             -sinbeta/np.sqrt(2)*np.exp(-1j*gamma)],
-            [(1-cosbeta)/2*np.exp(1j*alpha+1j*gamma),
-             sinbeta/np.sqrt(2),
-             (1+cosbeta)/2*np.exp(1j*alpha-1j*gamma)]
-             ])
+             -sinbeta / np.sqrt(2) * np.exp(-1j * gamma)],
+            [(1 - cosbeta) / 2 * np.exp(1j * alpha + 1j * gamma),
+             sinbeta / np.sqrt(2),
+             (1 + cosbeta) / 2 * np.exp(1j * alpha - 1j * gamma)]
+        ])
 
         if invert:
             D = np.linalg.inv(D)
@@ -714,8 +731,7 @@ class LaserBeam(object):
         if pol.shape == (3,) and quant_axis.shape == (3,):
             return D @ pol
         else:
-            return np.tensordot(D, pol, ([1],[0]))
-
+            return np.tensordot(D, pol, ([1], [0]))
 
     def cartesian_pol(self, R=np.array([0., 0., 0.]), t=0):
         """
@@ -779,7 +795,6 @@ class LaserBeam(object):
 
         return np.array([np.dot(pol_cart, xp), np.dot(pol_cart, yp)])
 
-
     def stokes_parameters(self, xp, yp, R=np.array([0., 0., 0.]), t=0):
         """
         The Stokes Parameters of the laser beam at R and t
@@ -805,12 +820,11 @@ class LaserBeam(object):
         """
         jones_vector = self.jones_vector(xp, yp, R, t)
 
-        Q = np.abs(jones_vector[0])**2 - np.abs(jones_vector[1])**2
-        U = 2*np.real(jones_vector[0]*np.conj(jones_vector[1]))
-        V = -2*np.imag(jones_vector[0]*np.conj(jones_vector[1]))
+        Q = np.abs(jones_vector[0]) ** 2 - np.abs(jones_vector[1]) ** 2
+        U = 2 * np.real(jones_vector[0] * np.conj(jones_vector[1]))
+        V = -2 * np.imag(jones_vector[0] * np.conj(jones_vector[1]))
 
         return (Q, U, V)
-
 
     def polarization_ellipse(self, xp, yp, R=np.array([0., 0., 0.]), t=0):
         """
@@ -840,16 +854,15 @@ class LaserBeam(object):
         Q, U, V = self.stokes_parameters(xp, yp, R, t)
 
         psi = np.arctan2(U, Q)
-        while psi<0:
-            psi+=2*np.pi
-        psi = psi%(2*np.pi)/2
-        if np.sqrt(Q**2+U**2)>1e-10:
-            chi = 0.5*np.arctan(V/np.sqrt(Q**2+U**2))
+        while psi < 0:
+            psi += 2 * np.pi
+        psi = psi % (2 * np.pi) / 2
+        if np.sqrt(Q ** 2 + U ** 2) > 1e-10:
+            chi = 0.5 * np.arctan(V / np.sqrt(Q ** 2 + U ** 2))
         else:
-            chi = np.pi/4*np.sign(V)
+            chi = np.pi / 4 * np.sign(V)
 
         return (psi, chi)
-
 
     def electric_field(self, R, t):
         """
@@ -874,16 +887,16 @@ class LaserBeam(object):
         delta_phase = self.delta_phase(t)
         phase = self.phase(t)
 
-        amp = np.sqrt(2*s)
+        amp = np.sqrt(2 * s)
 
         if isinstance(t, float):
             Eq = electric_field(R, t, amp, pol, kvec, delta_phase - phase)
         else:
-            Eq = pol.reshape(3, t.size)*\
-            (amp*np.exp(-1j*dot2D(kvec, R) + 1j*delta_phase - 1j*phase)).reshape(1, t.size)
+            Eq = pol.reshape(3, t.size) * \
+                 (amp * np.exp(-1j * dot2D(kvec, R) + 1j * delta_phase - 1j * phase)).reshape(1,
+                                                                                              t.size)
 
         return Eq
-
 
     def electric_field_gradient(self, R, t):
         """
@@ -911,13 +924,13 @@ class LaserBeam(object):
         """
         (dx, dy, dz) = return_dx_dy_dz(R, self.eps)
         delEq = np.array([
-            (self.electric_field(R+dx, t) -
-             self.electric_field(R-dx, t))/2/self.eps,
-            (self.electric_field(R+dy, t) -
-             self.electric_field(R-dy, t))/2/self.eps,
-            (self.electric_field(R+dz, t) -
-             self.electric_field(R-dz, t))/2/self.eps
-            ])
+            (self.electric_field(R + dx, t) -
+             self.electric_field(R - dx, t)) / 2 / self.eps,
+            (self.electric_field(R + dy, t) -
+             self.electric_field(R - dy, t)) / 2 / self.eps,
+            (self.electric_field(R + dz, t) -
+             self.electric_field(R - dz, t)) / 2 / self.eps
+        ])
 
         return delEq
 
@@ -962,6 +975,7 @@ class InfinitePlaneWaveBeam(LaserBeam):
     This implementation is much faster, when it can be used, compared to the
     base laserBeam class.
     """
+
     def __init__(self, kvec, pol, s, delta, **kwargs):
         if callable(kvec):
             raise TypeError('kvec cannot be a function for an infinite plane wave.')
@@ -981,8 +995,8 @@ class InfinitePlaneWaveBeam(LaserBeam):
         self.con_s = s
         self.con_pol = self.pol(np.array([0., 0., 0.]), 0.)
         # Define attributes to speed up gradient calculation:
-        self.amp = np.sqrt(2*self.con_s)
-        self.dEq_prefactor = (-1j*self.amp*self.con_kvec.reshape(3, 1)*
+        self.amp = np.sqrt(2 * self.con_s)
+        self.dEq_prefactor = (-1j * self.amp * self.con_kvec.reshape(3, 1) *
                               self.con_pol.reshape(1, 3))
 
     def electric_field_gradient(self, R, t):
@@ -990,12 +1004,13 @@ class InfinitePlaneWaveBeam(LaserBeam):
         delta_phase = self.delta_phase(t)
         phase = self.phase(t)
 
-        if isinstance(t, float) or (isinstance(t, np.ndarray) and t.size==1):
-            delEq = self.dEq_prefactor*\
-            np.exp(-1j*np.dot(self.con_kvec, R) + 1j*delta_phase - 1j*phase)
+        if isinstance(t, float) or (isinstance(t, np.ndarray) and t.size == 1):
+            delEq = self.dEq_prefactor * \
+                    np.exp(-1j * np.dot(self.con_kvec, R) + 1j * delta_phase - 1j * phase)
         else:
-            delEq = self.dEq_prefactor.reshape(3, 3, 1)*\
-            np.exp(-1j*np.dot(self.con_kvec, R) + 1j*delta_phase -1j*phase).reshape(1, 1, t.size)
+            delEq = self.dEq_prefactor.reshape(3, 3, 1) * \
+                    np.exp(-1j * np.dot(self.con_kvec, R) + 1j * delta_phase - 1j * phase).reshape(
+                        1, 1, t.size)
 
         return delEq
 
@@ -1039,6 +1054,7 @@ class GaussianBeam(LaserBeam):
     **kwargs:
         Additional keyword arguments to pass to the laserBeam superclass.
     """
+
     def __init__(self, kvec, pol, s, delta, wb, **kwargs):
         if callable(kvec):
             raise TypeError('kvec cannot be a function for a Gaussian beam.')
@@ -1051,12 +1067,12 @@ class GaussianBeam(LaserBeam):
 
         # Save the constant values (might be useful):
         self.con_kvec = kvec
-        self.con_khat = kvec/np.linalg.norm(kvec)
+        self.con_khat = kvec / np.linalg.norm(kvec)
         self.con_pol = self.pol(np.array([0., 0., 0.]), 0.)
 
         # Save the parameters specific to the Gaussian beam:
-        self.s_max = s # central saturation parameter
-        self.wb = wb # 1/e^2 radius
+        self.s_max = s  # central saturation parameter
+        self.wb = wb  # 1/e^2 radius
         self.define_rotation_matrix()
 
     def define_rotation_matrix(self):
@@ -1070,9 +1086,9 @@ class GaussianBeam(LaserBeam):
     def intensity(self, R=np.array([0., 0., 0.]), t=0.):
         # Rotate up to the z-axis where we can apply formulas:
         Rp = np.einsum('ij,j...->i...', self.rmat, R)
-        rho_sq=np.sum(Rp[:2]**2, axis=0)
+        rho_sq = np.sum(Rp[:2] ** 2, axis=0)
         # Return the intensity:
-        return self.s_max*np.exp(-2*rho_sq/self.wb**2)
+        return self.s_max * np.exp(-2 * rho_sq / self.wb ** 2)
 
 
 class ClippedGaussianBeam(GaussianBeam):
@@ -1117,15 +1133,16 @@ class ClippedGaussianBeam(GaussianBeam):
     **kwargs:
         Additional keyword arguments to pass to the laserBeam superclass.
     """
+
     def __init__(self, kvec, pol, s, delta, wb, rs, **kwargs):
         super().__init__(kvec=kvec, pol=pol, s=s, delta=delta, wb=wb, **kwargs)
 
-        self.rs = rs # Save the radius of the stop.
+        self.rs = rs  # Save the radius of the stop.
 
     def intensity(self, R=np.array([0., 0., 0.]), t=0.):
         Rp = np.einsum('ij,j...->i...', self.rmat, R)
-        rho_sq = np.sum(Rp[:2]**2, axis=0)
-        return self.s_max*np.exp(-2*rho_sq/self.wb**2)*(np.sqrt(rho_sq)<self.rs)
+        rho_sq = np.sum(Rp[:2] ** 2, axis=0)
+        return self.s_max * np.exp(-2 * rho_sq / self.wb ** 2) * (np.sqrt(rho_sq) < self.rs)
 
 
 class LaserBeams(object):
@@ -1134,7 +1151,7 @@ class LaserBeams(object):
 
     Parameters
     ----------
-    laserbeamparams : array_like of laserBeam or array_like of dictionaries
+    laser_beams : array_like of laserBeam or array_like of dictionaries
         If array_like contains laserBeams, the laserBeams in the array will be joined
         together to form a collection.  If array_like is a list of dictionaries, the
         dictionaries will be passed as keyword arguments to beam_type
@@ -1142,30 +1159,25 @@ class LaserBeams(object):
         Type of beam to use in the collection of laserBeams.  By default
         `beam_type=laserBeam`.
     """
-    def __init__(self, laserbeamparams=None, beam_type=LaserBeam):
-        if laserbeamparams is not None:
-            if not isinstance(laserbeamparams, list):
-                raise ValueError('laserbeamparams must be a list.')
-            self.beam_vector = []
-            for laserbeamparam in laserbeamparams:
-                if isinstance(laserbeamparam, dict):
-                    self.beam_vector.append(beam_type(**laserbeamparam))
-                elif isinstance(laserbeamparam, LaserBeam):
-                    self.beam_vector.append(laserbeamparam)
-                else:
-                    raise TypeError('Each element of laserbeamparams must either ' +
-                                    'be a list of dictionaries or list of ' +
-                                    'laserBeams')
+    beam_vector: list[LaserBeam]
 
-            self.num_of_beams = len(self.beam_vector)
-        else:
-            self.beam_vector = []
-            self.num_of_beams = 0
+    def __init__(self, laser_beams: list[LaserBeam] | None = None, beam_type=LaserBeam):
+        if laser_beams is None:
+            laser_beams = []
+        self.beam_vector = []
+        if not isinstance(laser_beams, list):
+            raise ValueError('laser_beam_params must be a list.')
+        # region check if all laser_beams items are LaserBeam objects
+        for param in laser_beams:
+            if not isinstance(param, LaserBeam):
+                raise TypeError('Each element of laser_beam_params must be a LaserBeam object')
+        # endregion
+        self.beam_vector = laser_beams
+        self.num_of_beams = len(self.beam_vector)
 
     def __iadd__(self, other):
         self.beam_vector += other.beam_vector
         self.num_of_beams = len(self.beam_vector)
-
         return self
 
     def __add__(self, other):
@@ -1177,16 +1189,13 @@ class LaserBeams(object):
 
         Parameters
         ----------
-        new_laser : laserBeam or laserBeam subclass
+        new_laser : LaserBeam
         """
         if isinstance(new_laser, LaserBeam):
             self.beam_vector.append(new_laser)
             self.num_of_beams = len(self.beam_vector)
-        elif isinstance(new_laser, dict):
-            self.beam_vector.append(LaserBeam(**new_laser))
         else:
-            raise TypeError('new_laser should by type laserBeam or a dictionary' +
-                            'of arguments to initialize the laserBeam class.')
+            raise TypeError('new_laser should be a LaserBeam object')
 
     def pol(self, R=np.array([0., 0., 0.]), t=0.):
         """
@@ -1342,7 +1351,6 @@ class LaserBeams(object):
         """
         return np.sum(self.electric_field_gradient(R, t), axis=0)
 
-
     def project_pol(self, quant_axis, R=np.array([0., 0., 0.]), t=0, **kwargs):
         """
         Project the polarization onto a quantization axis.
@@ -1370,38 +1378,38 @@ class LaserBeams(object):
             laser beams
         """
         cosbeta = quant_axis[2]
-        sinbeta = np.sqrt(1-cosbeta**2)
+        sinbeta = np.sqrt(1 - cosbeta ** 2)
         if isinstance(cosbeta, float):
-            if np.abs(cosbeta)<1:
+            if np.abs(cosbeta) < 1:
                 gamma = np.arctan2(quant_axis[1], quant_axis[0])
             else:
                 gamma = 0
             alpha = 0
         else:
             gamma = np.zeros(cosbeta.shape)
-            inds = np.abs(quant_axis[2])<1
+            inds = np.abs(quant_axis[2]) < 1
             gamma[inds] = np.arctan2(quant_axis[1][inds],
-                                         quant_axis[0][inds])
+                                     quant_axis[0][inds])
             alpha = np.zeros(cosbeta.shape)
 
         quant_axis = quant_axis.astype('float64')
 
         D = np.array([
-            [(1+cosbeta)/2*np.exp(-1j*alpha + 1j*gamma),
-             -sinbeta/np.sqrt(2)*np.exp(-1j*alpha),
-             (1-cosbeta)/2*np.exp(-1j*alpha - 1j*gamma)],
-            [sinbeta/np.sqrt(2)*np.exp(1j*gamma),
+            [(1 + cosbeta) / 2 * np.exp(-1j * alpha + 1j * gamma),
+             -sinbeta / np.sqrt(2) * np.exp(-1j * alpha),
+             (1 - cosbeta) / 2 * np.exp(-1j * alpha - 1j * gamma)],
+            [sinbeta / np.sqrt(2) * np.exp(1j * gamma),
              cosbeta,
-             -sinbeta/np.sqrt(2)*np.exp(-1j*gamma)],
-            [(1-cosbeta)/2*np.exp(1j*alpha+1j*gamma),
-             sinbeta/np.sqrt(2),
-             (1+cosbeta)/2*np.exp(1j*alpha-1j*gamma)]
-             ])
+             -sinbeta / np.sqrt(2) * np.exp(-1j * gamma)],
+            [(1 - cosbeta) / 2 * np.exp(1j * alpha + 1j * gamma),
+             sinbeta / np.sqrt(2),
+             (1 + cosbeta) / 2 * np.exp(1j * alpha - 1j * gamma)]
+        ])
 
         if quant_axis.shape == (3,) and R.shape == (3,):
             return [D @ beam.pol(R, t) for beam in self.beam_vector]
         else:
-            return [np.tensordot(D, beam.pol(R, t), ([1],[0]))
+            return [np.tensordot(D, beam.pol(R, t), ([1], [0]))
                     for beam in self.beam_vector]
 
     def cartesian_pol(self, R=np.array([0., 0., 0.]), t=0):
@@ -1525,61 +1533,17 @@ class Conventional3DMOTBeams(LaserBeams):
     **kwargs :
         other keyword arguments to pass to beam_type
     """
+
     def __init__(self, k=1, pol=+1, rotation_angles=[0., 0., 0.],
                  rotation_spec='ZYZ', beam_type=LaserBeam, **kwargs):
         super().__init__()
 
         rot_mat = Rotation.from_euler(rotation_spec, rotation_angles).as_matrix()
 
-        kvecs = [np.array([ 1.,  0.,  0.]), np.array([-1.,  0.,  0.]),
-                 np.array([ 0.,  1.,  0.]), np.array([ 0., -1.,  0.]),
-                 np.array([ 0.,  0.,  1.]), np.array([ 0.,  0., -1.])]
+        kvecs = [np.array([1., 0., 0.]), np.array([-1., 0., 0.]),
+                 np.array([0., 1., 0.]), np.array([0., -1., 0.]),
+                 np.array([0., 0., 1.]), np.array([0., 0., -1.])]
         pols = [-pol, -pol, -pol, -pol, +pol, +pol]
 
         for kvec, pol in zip(kvecs, pols):
-            self.add_laser(beam_type(kvec=rot_mat @ (k*kvec), pol=pol, **kwargs))
-
-
-if __name__ == '__main__':
-    import matplotlib.pyplot as plt
-
-    test_field = MagField(lambda R: np.array([-0.5*R[0], -0.5*R[1], 1*R[2]]))
-
-    print(test_field.Field())
-    print(test_field.gradient(np.array([5., 2., 1.])))
-
-    example_beams = LaserBeams([
-        {'kvec':np.array([0., 0., 1.]), 'pol':np.array([0., 0., 1.]),
-         'pol_coord':'spherical', 'delta':-2, 's': 1.},
-        {'kvec':np.array([0., 0., -1.]), 'pol':np.array([0., 0., 1.]),
-         'pol_coord':'spherical', 'delta':-2, 's': 1.},
-        ])
-
-    print(example_beams.beam_vector[0].jones_vector(np.array([1., 0., 0.]), np.array([0., 1., 0.])))
-
-    print(example_beams.kvec())
-    print(example_beams.pol())
-    print(example_beams.intensity())
-    print(example_beams.electric_field_gradient(np.array([0., 0., 0.]), 0.5))
-
-    example_beams_2 = LaserBeams([
-        {'kvec':np.array([0., 0., 1.]), 'pol':np.array([0., 0., 1.]),
-         'pol_coord':'spherical', 'delta':-2, 's': lambda R: 1.},
-        {'kvec':np.array([0., 0., -1.]), 'pol':np.array([0., 0., 1.]),
-         'pol_coord':'spherical', 'delta':-2, 's': lambda R: 1.},
-        ])
-
-    print(example_beams_2.electric_field_gradient(np.array([0., 0., 0.]), 0.5))
-
-    example_beam = GaussianBeam(np.array([1., 0., 0.]), +1, 5, -2, 1000)
-    print(example_beam.s(np.array([0., 1000/np.sqrt(2), 1000/np.sqrt(2)])))
-
-    example_beam = InfinitePlaneWaveBeam(np.array([1., 0., 0.]), +1, 5, -2)
-    print(example_beam.electric_field_gradient(np.array([0., 0., 0.]), 0.))
-
-    R = np.random.rand(3, 101)
-    t = np.linspace(0, 10, 101)
-    print(example_beam.electric_field_gradient(R, t).shape)
-
-    MOT_beams = Conventional3DMOTBeams(-2, 1, beam_type=GaussianBeam, wb=1000)
-    MOT_beams.beam_vector[1].kvec()
+            self.add_laser(beam_type(kvec=rot_mat @ (k * kvec), pol=pol, **kwargs))
