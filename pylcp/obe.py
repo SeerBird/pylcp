@@ -2,20 +2,21 @@
 Tools for solving the OBE for laser cooling
 author: spe
 """
-import numpy as np
 import copy
 import time
+
 import numba
+import numpy as np
 import scipy.sparse as sparse
 from scipy.integrate import solve_ivp
 from scipy.interpolate import interp1d
-from .rateeq import RateEq
-from .fields import LaserBeams, MagField
-from .integration_tools import solve_ivp_random
-from .common import (Progressbar, random_vector, spherical_dot,
-                     cart2spherical, spherical2cart, BaseForceProfile)
+
+from .common import (Progressbar, random_vector, cart2spherical, spherical2cart, BaseForceProfile)
 from .governingeq import GoverningEq
-from .typing import TransitionKey, OBEEvolutionMatrices
+from .integration_tools import solve_ivp_random
+from .rateeq import RateEq
+from .typing import OBEEvolutionMatrices
+
 
 @numba.vectorize([numba.float64(numba.complex128),numba.float32(numba.complex64)])
 def abs2(x):

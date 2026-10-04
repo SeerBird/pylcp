@@ -7,7 +7,7 @@ name = "pylcp"
 version = "1.0.2+seerbird.1"
 description = "A package for calculating laser cooling physics"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = { file = "LICENSE" }
 license-files = ["LICENSE*"]
 authors = [

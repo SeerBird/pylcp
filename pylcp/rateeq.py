@@ -3,20 +3,16 @@
 """
 Tools for solving the rate equations.
 """
+import numba
 import numpy as np
-import copy
-from scipy.optimize import minimize
 from scipy.integrate import solve_ivp
-from inspect import signature
-from .fields import LaserBeams, MagField
-from .common import (Progressbar, random_vector, spherical_dot,
-                     cart2spherical, spherical2cart, BaseForceProfile)
-from .governingeq import GoverningEq
-from .typing import TransitionKey, RateEqEvolutionMatrices
-from .integration_tools import solve_ivp_random
 from scipy.interpolate import interp1d
 
-import numba
+from .common import (Progressbar, random_vector, BaseForceProfile)
+from .governingeq import GoverningEq
+from .integration_tools import solve_ivp_random
+from .typing import RateEqEvolutionMatrices
+
 
 @numba.vectorize([numba.float64(numba.complex128), numba.float32(numba.complex64)])
 def abs2(x):

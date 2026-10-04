@@ -1,3 +1,4 @@
+from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Any, Union, Iterator, Literal, Callable, TYPE_CHECKING
@@ -88,24 +89,19 @@ class ValidationType(Enum):
 
 def validate_field_param_value(val: NumericScalar | VectorLike,
                                name: str, validation_type: ValidationType, error_text_for_callable):
-
+    must_be = f"{'function must return' if error_text_for_callable else 'must be'}"
     if validation_type == ValidationType.NumericScalar:
         # check if type of constant is correct
         if not isinstance(val, float | complex):
-            raise TypeError(f"{name.capitalize()} " +
-                          f"{"function must return" if error_text_for_callable else "must be"}" +
-                          f" a float or complex number")
+            raise TypeError(f"{name.capitalize()} {must_be} a float or complex number")
         return val
     else:  # validation_type == ValidationType.VectorLike
         # check if type of vector is correct
         if not isinstance(val, VectorLike):
-            raise TypeError(f"{name.capitalize()} " +
-                            f"{"function must return" if error_text_for_callable else "be"}" +
-                            " an array-like of 3 float or complex numbers")
+            raise TypeError(f"{name.capitalize()} {must_be} an array-like of 3 float "
+                            f"or complex numbers")
         # region check if size of vector is correct
-        not3error = ValueError(f"{name.capitalize()} " +
-                               f"{"function must return" if error_text_for_callable else "be"}" +
-                               f" a vector with 3 components")
+        not3error = ValueError(f"{name.capitalize()} {must_be} a vector with 3 components")
         if isinstance(val, (list, tuple)):
             if len(val) != 3:
                 raise not3error

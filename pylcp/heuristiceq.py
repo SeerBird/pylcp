@@ -1,15 +1,12 @@
 import numpy as np
-import copy
-import time
-import numba
 from scipy.integrate import solve_ivp
-from scipy.interpolate import interp1d
-from .integration_tools import solve_ivp_random
-from .common import (Progressbar, random_vector, spherical_dot,
-                     cart2spherical, spherical2cart)
-from .common import BaseForceProfile as force_profile
+
+from .common import BaseForceProfile
+from .common import (Progressbar, random_vector)
 from .governingeq import GoverningEq
+from .integration_tools import solve_ivp_random
 from .typing import TransitionKey
+
 
 class HeuristicEq(GoverningEq):
     """
@@ -354,7 +351,7 @@ class HeuristicEq(GoverningEq):
         if not name:
             name = '{0:d}'.format(len(self.profile))
 
-        self.profile[name] = force_profile(R, V, self.laserBeams, None)
+        self.profile[name] = BaseForceProfile(R, V, self.laserBeams, None)
 
         it = np.nditer([R[0], R[1], R[2], V[0], V[1], V[2]],
                        flags=['refs_ok', 'multi_index'],

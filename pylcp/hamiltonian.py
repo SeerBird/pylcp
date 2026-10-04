@@ -3,7 +3,7 @@ from .common import spherical2cart
 from .typing import TransitionKey
 
 # Next, define a Hamiltonian class to work out the internal states:
-class Hamiltonian():
+class Hamiltonian:
     """
     A representation of the Hamiltonian in blocks
 
@@ -598,26 +598,3 @@ class Hamiltonian():
 
     def diag_H_0(self, B0):
         pass
-
-
-# %%
-if __name__ == '__main__':
-    """
-    A simple test of the Hamiltonian class.
-    """
-    Hg, mugq = hamiltonians.singleF(F=1, muB=1)
-    He, mueq = hamiltonians.singleF(F=2, muB=1)
-    d_q = pylcp.hamiltonians.dqij_two_bare_hyperfine(1, 2)
-
-    ham1 = hamiltonian()
-    ham1.add_H_0_block('g', Hg)
-    ham1.add_mu_q_block('g', mugq)
-    print(ham1.blocks)
-    ham1.add_H_0_block('e', He)
-    ham1.add_mu_q_block('e', mueq)
-    print(ham1.blocks)
-    ham1.add_d_q_block('g', 'e', d_q)
-    print(ham1.blocks)
-
-    ham1.make_full_matrices()
-    ham1.diag_static_field(np.array([0, 0.5, 0]))
