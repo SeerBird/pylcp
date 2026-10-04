@@ -1,5 +1,4 @@
 import importlib
-import numpy as np
 import pytest
 
 upstream_atom = importlib.import_module("tests.vendor.upstream_pylcp.atom")

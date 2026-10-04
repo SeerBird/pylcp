@@ -1,10 +1,11 @@
+from __future__ import annotations
 import copy
 from typing import TYPE_CHECKING
 
 import numpy as np
 
 if TYPE_CHECKING:
-    from . import Hamiltonian
+    from .hamiltonian import Hamiltonian
 from .fields import MagField, LaserBeams
 from .typing import TransitionKey, Dependence
 from scipy.optimize import root_scalar, root
