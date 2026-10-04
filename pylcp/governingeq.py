@@ -1,7 +1,12 @@
 import copy
+from typing import TYPE_CHECKING
+
 import numpy as np
+
+if TYPE_CHECKING:
+    from . import Hamiltonian
 from .fields import MagField, LaserBeams
-from .typing import TransitionKey
+from .typing import TransitionKey, Dependence
 from scipy.optimize import root_scalar, root
 
 class GoverningEq(object):
@@ -28,8 +33,8 @@ class GoverningEq(object):
             * a list of pylcp.LaserBeam: automatically promoted to a
               pylcp.LaserBeams object assumed to address the transtion `g->e`.
 
-    magField : pylcp.MagField or callable
-        The function or object that defines the magnetic field.
+    magField : pylcp.MagField
+        The object that defines the magnetic field.
     hamiltonian : pylcp.Hamiltonian or None
         The internal hamiltonian of the particle.
     a : array_like, shape (3,), optional
@@ -41,7 +46,7 @@ class GoverningEq(object):
         Initial velocity.  Default: [0.,0.,0.]
     """
 
-    def __init__(self, laserBeams, magField, hamiltonian=None,
+    def __init__(self, laserBeams, magField:MagField, hamiltonian:Hamiltonian|None=None,
                  a=np.array([0., 0., 0.]), r0=np.array([0., 0., 0.]),
                  v0=np.array([0., 0., 0.])):
         self.set_initial_position_and_velocity(r0, v0)
@@ -50,11 +55,13 @@ class GoverningEq(object):
         default_tk = TransitionKey('g', 'e')
         self.laserBeams = {}
         if isinstance(laserBeams, list):
+            # TODO: check the list contains LaserBeam objects
             self.laserBeams[default_tk] = copy.copy(LaserBeams(laserBeams))
         elif isinstance(laserBeams, LaserBeams):
             self.laserBeams[default_tk] = copy.copy(laserBeams)
         elif isinstance(laserBeams, dict):
             for key, val in laserBeams.items():
+                # TODO: check keys and values are valid
                 self.laserBeams[key] = copy.copy(val)
         else:
             raise TypeError('laserBeams is not a valid type.')
@@ -68,10 +75,18 @@ class GoverningEq(object):
         # Add the Hamiltonian:
         if hamiltonian is not None:
             self.hamiltonian = copy.copy(hamiltonian)
+            if TYPE_CHECKING:
+                assert self.hamiltonian is not None
             self.hamiltonian.make_full_matrices()
 
             # Next, check to see if there is consistency in k:
-            self.__check_consistency_in_lasers_and_d_q()
+            # Check that laser beam keys and Hamiltonian keys match.
+            for laser_key in self.laserBeams.keys():
+                if not laser_key in self.hamiltonian.laser_keys.keys():
+                    raise ValueError(f'laserBeams dictionary key {laser_key} ' +
+                                     'does not have a corresponding key in the ' +
+                                     'Hamiltonian d_q.')
+
 
         # Check the acceleration:
         if not isinstance(a, np.ndarray):
@@ -90,14 +105,6 @@ class GoverningEq(object):
         # Set an attribute for the equillibrium position:
         self.r_eq = None
 
-
-    def __check_consistency_in_lasers_and_d_q(self):
-        # Check that laser beam keys and Hamiltonian keys match.
-        for laser_key in self.laserBeams.keys():
-            if not laser_key in self.hamiltonian.laser_keys.keys():
-                raise ValueError(f'laserBeams dictionary key {laser_key} ' +
-                                 'does not have a corresponding key in the ' +
-                                 'Hamiltonian d_q.')
 
 
     def set_initial_position_and_velocity(self, r0, v0):
@@ -204,7 +211,7 @@ class GoverningEq(object):
             A list of axis indices to compute the trapping frequencies along.
             Here, :math:`\hat{x}` is index 0, :math:`\hat{y}` is index 1, and
             :math:`\hat{z}` is index 2.  For example, `axes=[2]` calculates
-            the trapping frquency along :math:`\hat{z}`.
+            the trapping frequency along :math:`\hat{z}`.
         kwargs :
             Any additional keyword arguments to pass to find_equilibrium_force()
 
@@ -213,6 +220,7 @@ class GoverningEq(object):
         r_eq : list or float
             The equilibrium positions along the selected axes.
         """
+        axes = np.asarray(axes)
         if self.r_eq is None:
             self.r_eq = np.zeros((3,))
 
@@ -248,7 +256,7 @@ class GoverningEq(object):
             A list of axis indices to compute the trapping frequencies along.
             Here, :math:`\hat{x}` is index 0, :math:`\hat{y}` is index 1, and
             :math:`\hat{z}` is index 2.  For example, `axes=[2]` calculates
-            the trapping frquency along :math:`\hat{z}`.
+            the trapping frequency along :math:`\hat{z}`.
         r : array_like, optional
             The position at which to calculate the damping coefficient.  By
             default r=None, which defaults to calculating at the equilibrium
@@ -265,7 +273,8 @@ class GoverningEq(object):
         omega : list or float
             The trapping frequencies along the selected axes.
         """
-        self.omega = np.zeros(3,)
+        axes = np.asarray(axes)
+        omega = np.zeros(3,)
 
         if isinstance(eps, float):
             eps = np.array([eps]*3)
@@ -278,6 +287,8 @@ class GoverningEq(object):
         if hasattr(self, 'mass'):
             mass = self.mass
         else:
+            if self.hamiltonian is None:
+                raise RuntimeError("No mass value to use to calculate trapping frequencies")
             mass = self.hamiltonian.mass
 
         for axis in axes:
@@ -295,13 +306,13 @@ class GoverningEq(object):
                     F[jj] = f[axis]
 
                 if np.diff(F)<0:
-                    self.omega[axis] = np.sqrt(-np.diff(F)/(2*eps[axis]*mass))
+                    omega[axis] = np.sqrt(-np.diff(F)/(2*eps[axis]*mass))
                 else:
-                    self.omega[axis] = 0
+                    omega[axis] = 0
             else:
-                self.omega[axis] = 0
+                omega[axis] = 0
 
-        return self.omega[axes]
+        return omega[axes]
 
     def damping_coeff(self, axes, r=None, eps=0.01, **kwargs):
         r"""

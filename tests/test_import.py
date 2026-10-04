@@ -21,4 +21,4 @@ def test_basic_exports():
     assert hasattr(pylcp, "MagField")
     assert hasattr(pylcp, "LaserBeams")
     assert hasattr(pylcp, "TransitionKey")
-    assert hasattr(pylcp, "Signature")
+    assert hasattr(pylcp, "Dependence")

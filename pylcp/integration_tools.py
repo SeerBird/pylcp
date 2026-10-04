@@ -4,7 +4,7 @@ import numpy as np
 from inspect import signature
 from scipy.integrate._ivp.bdf import BDF
 from scipy.integrate._ivp.radau import Radau
-from scipy.integrate._ivp.rk import RK23, RK45
+from scipy.integrate._ivp.rk import RK23, RK45, DOP853
 from scipy.integrate._ivp.lsoda import LSODA
 from scipy.optimize import OptimizeResult
 from scipy.integrate._ivp.common import EPS, OdeSolution
@@ -32,9 +32,9 @@ class RandomOdeResult(OptimizeResult):
     pass
 
 
-class parallelIntegrator(object):
+class Parallelintegrator(object):
     """
-    parallelIntegrator: a class to integrate a function as it is being called
+    ParallelIntegrator: a class to integrate a function as it is being called
 
     Parameters:
     ----------

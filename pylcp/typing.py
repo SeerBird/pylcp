@@ -1,33 +1,166 @@
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Union, Iterator, Literal
+from enum import Enum, auto
+from typing import Any, Union, Iterator, Literal, Callable, TYPE_CHECKING
 import numpy as np
+import inspect
 
 Vector3D = np.ndarray[tuple[Literal[3], ...], np.dtype[np.float64] | np.dtype[np.complex128]]
-InputVector3D = Vector3D | tuple[float, float, float] | list[float]
 
 
-def validate_input_3vector_and_cast_to_ndarray(vector: InputVector3D):
-    not3_error = ValueError("A 3D vector needs to have 3 components")
-    # TODO: validate components
-    # TODO: consider functional typing? maybe by accessing the 3 components
-    if isinstance(vector, np.ndarray):
-        if vector.shape[0] != 3:
-            raise not3_error
-        return vector
-    elif isinstance(vector, tuple | list):
-        if len(vector) != 3:
-            raise not3_error
-        return np.asarray(vector)
-    else:
-        raise TypeError("3-vector should be an ndarray, tuple, or list")
+class Dependence(Enum):
+    """Function argument signatures used for field promotion and parameter metadata."""
+    CONSTANT = 0
+    POSITION_ONLY = 1
+    TIME_ONLY = 2
+    POSITION_AND_TIME = 3
+
+    def __lt__(self, other):
+        if self.__class__ is other.__class__:
+            return self.value < other.value
+        return NotImplemented
+
+    def __le__(self, other):
+        if self.__class__ is other.__class__:
+            return self.value <= other.value
+        return NotImplemented
+
+    def __gt__(self, other):
+        if self.__class__ is other.__class__:
+            return self.value > other.value
+        return NotImplemented
+
+    def __ge__(self, other):
+        if self.__class__ is other.__class__:
+            return self.value >= other.value
+        return NotImplemented
 
 
-class Signature(Enum):
-    """Function argument signatures used for field promotion and lambdas."""
-    POSITION_AND_TIME = "Rt"
-    TIME_ONLY = "t"
-    POSITION_ONLY = "R"
+def _inspect_callable_dependence(func: Callable) -> Dependence:
+    """Get Dependence and validate signature (check if func accepts zeroes)"""
+    sig = inspect.signature(func)
+    params = list(sig.parameters.keys())
+    if len(params) == 0:
+        raise ValueError("Please pass a constant instead of a zero-parameter callable")
+    elif len(params) == 1:
+        parameter = params[0].lower()
+        if parameter in ('t', 'time'):
+            try:
+                func(0)
+            except Exception:
+                raise ValueError(
+                    "Seemingly time-dependent field parameter didn't accept 0 as a parameter")
+            return Dependence.TIME_ONLY
+        else:
+            try:
+                func(np.zeros(3))
+            except Exception:
+                raise ValueError(
+                    "Seemingly space-dependent field parameter didn't accept" +
+                    " np.zeros(3) as a parameter")
+            return Dependence.POSITION_ONLY
+    else: # 2 params
+        try:
+            func(np.zeros(3), 0)
+        except Exception:
+            raise ValueError("A two-argument function should take position first and time second")
+        return Dependence.POSITION_AND_TIME
+
+
+# Scalar types:
+NumericScalar = float | int | complex | np.number
+
+# Vector / Array constant types:
+VectorLike = np.ndarray | list[float] | tuple[float, ...] | list[complex] | tuple[complex, ...]
+
+# Callable field functions: f(R), f(t), f(R, t) or general callable
+FieldCallable = (Callable[[np.ndarray], VectorLike | NumericScalar]
+                 | Callable[[float], VectorLike | NumericScalar]
+                 | Callable[[np.ndarray, float], VectorLike | NumericScalar])
+
+# Full comprehensive parameter value type:
+FieldParameterValue = NumericScalar | VectorLike | FieldCallable
+
+
+class ValidationType(Enum):
+    VectorLike = auto()
+    NumericScalar = auto()
+
+
+def validate_field_param_value(val: NumericScalar | VectorLike,
+                               name: str, validation_type: ValidationType, error_text_for_callable):
+
+    if validation_type == ValidationType.NumericScalar:
+        # check if type of constant is correct
+        if not isinstance(val, float | complex):
+            raise TypeError(f"{name.capitalize()} " +
+                          f"{"function must return" if error_text_for_callable else "must be"}" +
+                          f" a float or complex number")
+        return val
+    else:  # validation_type == ValidationType.VectorLike
+        # check if type of vector is correct
+        if not isinstance(val, VectorLike):
+            raise TypeError(f"{name.capitalize()} " +
+                            f"{"function must return" if error_text_for_callable else "be"}" +
+                            " an array-like of 3 float or complex numbers")
+        # region check if size of vector is correct
+        not3error = ValueError(f"{name.capitalize()} " +
+                               f"{"function must return" if error_text_for_callable else "be"}" +
+                               f" a vector with 3 components")
+        if isinstance(val, (list, tuple)):
+            if len(val) != 3:
+                raise not3error
+            return np.asarray(val)
+        else:
+            if TYPE_CHECKING:
+                assert isinstance(val, np.ndarray)
+            if val.shape[0] != 3 or len(val.shape) != 1:  # TODO: this check may be wrong
+                raise not3error
+            return val
+        # endregion
+        # TODO: check datatype?
+
+
+class FieldParameter:
+    """
+    Wraps a scalar, vector, or function parameter with explicit dependency metadata.
+    Avoids unnecessary lambda wrapping when the parameter is constant.
+    """
+    val: FieldParameterValue
+    name: str
+    dependence: Dependence
+
+    def __init__(
+            self, val: FieldParameterValue, name: str,validation_type: ValidationType):
+        self.name = name
+
+        if not callable(val):
+            self.dependence = Dependence.CONSTANT
+            self.val = validate_field_param_value(val, name, validation_type, False)
+        else:
+            self.val = val
+            self.dependence = _inspect_callable_dependence(val)
+            # region validate func returns at zeroes
+            if self.dependence == Dependence.POSITION_ONLY:
+                validate_field_param_value(self.val(np.zeros(3)), name, validation_type, True)
+            elif self.dependence == Dependence.TIME_ONLY:
+                validate_field_param_value(0., name, validation_type, True)
+            else:
+                validate_field_param_value(self.val(np.zeros(3),0.), name, validation_type, True)
+            # endregion
+
+    def __call__(self, R=np.array([0., 0., 0.]), t=0.):
+        if self.dependence == Dependence.CONSTANT:
+            return self.val
+
+        if TYPE_CHECKING:
+            assert callable(self.val)
+
+        if self.dependence == Dependence.POSITION_ONLY:
+            return self.val(R)
+        elif self.dependence == Dependence.TIME_ONLY:
+            return self.val(t)
+        else:
+            return self.val(R, t)
 
 
 @dataclass(frozen=True, slots=True)

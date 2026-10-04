@@ -1,7 +1,7 @@
 import numpy as np
 from inspect import signature
 from pylcp.common import cart2spherical, spherical2cart
-from .integration_tools import parallelIntegrator
+from .integration_tools import Parallelintegrator
 from scipy.spatial.transform import Rotation
 
 import numba
@@ -47,16 +47,16 @@ def return_constant_val_t(t, val):
         return val
 
 
-from .typing import Signature
+from .typing import Dependence, ValidationType
 
 
-def promote_to_lambda(val, var_name='', sig: Signature = Signature.POSITION_AND_TIME):
+def promote_to_lambda(val, var_name='', sig: Dependence = Dependence.POSITION_AND_TIME):
     """
     Promotes a constant or callable to a lambda function with proper arguments.
     """
     # TODO: decide if maybe forcing the user to make an R,t function would be better if this isn't
     #  optimized either way
-    if sig == Signature.POSITION_AND_TIME:
+    if sig == Dependence.POSITION_AND_TIME:
         if not callable(val):
             if isinstance(val, list) or isinstance(val, np.ndarray):
                 func = lambda R=np.array([0., 0., 0.]), t=0.: return_constant_vector(R, t, val)
@@ -79,7 +79,7 @@ def promote_to_lambda(val, var_name='', sig: Signature = Signature.POSITION_AND_
                                 'understood.' % (sig, var_name))
 
         return func, sig
-    elif sig == Signature.TIME_ONLY:
+    elif sig == Dependence.TIME_ONLY:
         if not callable(val):
             func = lambda t=0.: return_constant_val_t(t, val)
             sig = '()'
@@ -90,7 +90,6 @@ def promote_to_lambda(val, var_name='', sig: Signature = Signature.POSITION_AND_
             else:
                 raise TypeError('Signature [%s] of function %s not ' +
                                 'understood.' % (sig, var_name))
-
         return func, sig
 
 
@@ -109,6 +108,9 @@ def return_dx_dy_dz(R, eps):
         dz[2] = eps
 
     return dx, dy, dz
+
+
+from .typing import Dependence, FieldParameter
 
 
 class MagField(object):
@@ -137,17 +139,8 @@ class MagField(object):
 
     def __init__(self, field, eps=1e-5):
         self.eps = eps
-
-        R = np.random.rand(3)  # Pick a random point for testing
-
-        # Promote it to a lambda func:
-        self.Field, self.FieldSig = promote_to_lambda(field, var_name='for field')
-
-        # Try it out:
-        response = self.Field(R, 0.)
-        if (isinstance(response, float) or isinstance(response, int) or
-                len(response) != 3):
-            raise ValueError('Magnetic field function must return a vector.')
+        self.Field = FieldParameter(field, 'magnetic field', ValidationType.VectorLike)
+        self.dependence = self.Field.dependence
 
     def magnitude(self, R=np.array([0., 0., 0.]), t=0):
         """
@@ -315,7 +308,7 @@ class ConstantMagneticField(MagField):
     """
 
     def __init__(self, B0):
-        super().__init__(lambda R, t: B0)
+        super().__init__(B0)
 
         self.constant_grad_field_mag = np.zeros((3,))
         self.constant_grad_field = np.zeros((3, 3))
@@ -471,35 +464,49 @@ class LaserBeam(object):
 
     def __init__(self, kvec=None, s=None, pol=None, delta=None,
                  phase=0., pol_coord='spherical', eps=1e-5):
-        # Promote it to a lambda func:
-        if not kvec is None:
-            self.kvec, self.kvec_sig = promote_to_lambda(kvec, var_name='kvector')
+        if kvec is not None:
+            self._kvec_param = FieldParameter(kvec, 'kvector',ValidationType.VectorLike)
+            self.kvec = self._kvec_param
+            self.kvec_sig = self._kvec_param.dependence.name
 
-        # Promote it to a lambda func:
-        if not s is None:
-            self.intensity, self.intensity_sig = promote_to_lambda(s, var_name='s')
+        if s is not None:
+            self._intensity_param = FieldParameter(s, 's',ValidationType.NumericScalar)
+            self.intensity = self._intensity_param
+            self.intensity_sig = self._intensity_param.dependence.name
 
-        if not pol is None:
+        if pol is not None:
             if not callable(pol):
                 pol = self.__parse_constant_polarization(pol, pol_coord)
+            self._pol_param = FieldParameter(pol, 'polarization',ValidationType.VectorLike)
+            self.pol = self._pol_param
+            self.pol_sig = self._pol_param.dependence.name
 
-            # Now, promote!
-            self.pol, self.pol_sig = promote_to_lambda(pol, var_name='polarization')
+        if delta is not None:
+            self._delta_param = FieldParameter(delta, 'delta',ValidationType.NumericScalar)
+            self.delta = self._delta_param
+            self.delta_sig = self._delta_param.dependence.name
 
-        # Promote it to a lambda func:
-        if not delta is None:
-            self.delta, self.delta_sig = promote_to_lambda(delta, var_name='delta', sig=Signature.TIME_ONLY)
+            if self._delta_param.dependence == Dependence.TIME_ONLY or self._delta_param.dependence == Dependence.POSITION_AND_TIME:
+                self.delta_phase = Parallelintegrator(self.delta)
+            else:
+                d_val = self._delta_param.val
+                self.delta_phase = lambda t: d_val * t
 
-        if self.delta_sig == '(t)':
-            self.delta_phase = parallelIntegrator(self.delta)
-        elif self.delta_sig == '()':
-            self.delta_phase = lambda t: delta * t
-
-        # Promote it to a lambda func:
-        if not phase is None:
-            self.phase, self.phase_sig = promote_to_lambda(phase, var_name='phase', sig=Signature.TIME_ONLY)
+        if phase is not None:
+            self._phase_param = FieldParameter(phase, 'phase',ValidationType.NumericScalar)
+            self.phase = self._phase_param
+            self.phase_sig = self._phase_param.dependence.name
 
         self.eps = eps
+
+    @property
+    def dependence(self) -> Dependence:
+        deps = []
+        for attr in ('_kvec_param', '_intensity_param', '_pol_param', '_delta_param',
+                     '_phase_param'):
+            if hasattr(self, attr):
+                deps.append(getattr(self, attr).dependence)
+        return max(deps) if deps else Dependence.CONSTANT
 
     def __parse_constant_polarization(self, pol, pol_coord):
         if isinstance(pol, float) or isinstance(pol, int):
@@ -511,16 +518,13 @@ class LaserBeam(object):
 
             # Set the polarization in this direction:
             if np.sign(pol) < 0:
-                self.pol = np.array([1., 0., 0.], dtype='complex')
+                raw_pol = np.array([1., 0., 0.], dtype='complex')
             else:
-                self.pol = np.array([0., 0., 1.], dtype='complex')
-
-            # Promote to lambda:
-            self.pol, self.pol_sig = promote_to_lambda(self.pol, var_name='polarization')
+                raw_pol = np.array([0., 0., 1.], dtype='complex')
 
             # Project onto the actual k-vector:
-            self.pol = self.project_pol(self.kvec() / np.linalg.norm(self.kvec()),
-                                        invert=True).astype('complex128')
+            k_unit = self.kvec() / np.linalg.norm(self.kvec())
+            return self.project_pol(k_unit, pol=raw_pol, invert=True).astype('complex128')
 
         elif isinstance(pol, np.ndarray):
             if pol.shape != (3,):
@@ -632,7 +636,7 @@ class LaserBeam(object):
 
     # TODO: add testing of kvec/pol orthogonality.
     def project_pol(self, quant_axis: np.ndarray, R=np.array([0., 0., 0.]), t=0,
-                    treat_nans=False, calculate_norm=False, invert=False):
+                    treat_nans=False, calculate_norm=False, invert=False, pol=None):
         """
         Project the polarization onto a quantization axis.
 
@@ -658,8 +662,9 @@ class LaserBeam(object):
             The polarization projected onto the quantization axis.
         """
 
-        # First, return the polarization at the desired R and t.
-        pol = self.pol(R, t)
+        # First, return the polarization at the desired R and t if not explicitly provided.
+        if pol is None:
+            pol = self.pol(R, t)
 
         # Second, check the quanitization axis if specified by the user.  The fun
         # thing here is that we may only need to do this once, since it should
@@ -889,12 +894,17 @@ class LaserBeam(object):
 
         amp = np.sqrt(2 * s)
 
-        if isinstance(t, float):
+        if isinstance(t, (float, int, np.number)):
             Eq = electric_field(R, t, amp, pol, kvec, delta_phase - phase)
         else:
-            Eq = pol.reshape(3, t.size) * \
-                 (amp * np.exp(-1j * dot2D(kvec, R) + 1j * delta_phase - 1j * phase)).reshape(1,
-                                                                                              t.size)
+            if kvec.ndim == 1:
+                kvec_dot_r = np.dot(kvec, R) if R.ndim == 1 else np.einsum('i,i...->...', kvec, R)
+            else:
+                kvec_dot_r = dot2D(kvec, R)
+
+            pol_mat = pol.reshape(3, -1)
+            phase_term = np.exp(-1j * kvec_dot_r + 1j * delta_phase - 1j * phase)
+            Eq = pol_mat * (amp * phase_term).reshape(1, -1)
 
         return Eq
 
@@ -1174,6 +1184,12 @@ class LaserBeams(object):
         # endregion
         self.beam_vector = laser_beams
         self.num_of_beams = len(self.beam_vector)
+
+    @property
+    def dependence(self) -> Dependence:
+        if not self.beam_vector:
+            return Dependence.CONSTANT
+        return max(beam.dependence for beam in self.beam_vector)
 
     def __iadd__(self, other):
         self.beam_vector += other.beam_vector
