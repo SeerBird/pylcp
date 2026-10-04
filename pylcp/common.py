@@ -1,3 +1,4 @@
+from __future__ import annotations
 import time
 import copy
 from typing import TYPE_CHECKING

@@ -97,7 +97,7 @@ def validate_field_param_value(val: NumericScalar | VectorLike,
         return val
     else:  # validation_type == ValidationType.VectorLike
         # check if type of vector is correct
-        if not isinstance(val, VectorLike):
+        if not isinstance(val, tuple|np.ndarray|list):
             raise TypeError(f"{name.capitalize()} {must_be} an array-like of 3 float "
                             f"or complex numbers")
         # region check if size of vector is correct
