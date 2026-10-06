@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Any, Union, Iterator, Literal, Callable, TYPE_CHECKING
+from typing import Any, Union, Iterator, Literal, Callable, TYPE_CHECKING, NamedTuple
 import numpy as np
 import inspect
 
@@ -160,21 +160,13 @@ class FieldParameter:
 
 
 @dataclass(frozen=True, slots=True)
-class TransitionKey:
+class TransitionKey(NamedTuple):
     """Strongly typed representation of an atomic transition key (e.g. g->e)."""
     ground: str
     excited: str
 
     def __str__(self) -> str:
         return f"{self.ground}->{self.excited}"
-
-    @classmethod
-    def from_string(cls, key_str: str) -> "TransitionKey":
-        if "->" not in key_str:
-            raise ValueError(
-                f"Invalid transition key string format: '{key_str}'. Expected 'ground->excited'.")
-        g, e = key_str.split("->", 1)
-        return cls(ground=g, excited=e)
 
 
 @dataclass

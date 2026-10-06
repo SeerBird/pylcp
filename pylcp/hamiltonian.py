@@ -1,8 +1,123 @@
 import numpy as np
+
 from .common import spherical2cart
 from .typing import TransitionKey
 
+
+# region blocks
+class H0Block:  # TODO: consider only storing a single dimension?
+    def __init__(self, label: str, M: np.ndarray):
+        """assumes M is square, validation upstream"""
+        if len(M.shape) != 2 or M.shape[0] != M.shape[1]:
+            raise ValueError('H_0 must be a square 2D matrix')
+        self.label = label
+        self.matrix = M
+        self.parameters = {}
+
+        self.n = M.shape[0]
+
+    def return_block_in_place(self, i, j, N):
+        super_M = np.zeros((N, N), dtype='complex128')
+        super_M[i:i + self.n, j:j + self.n] = self.matrix
+
+        return super_M
+
+    @property
+    def diagonal(self):
+        M = self.matrix
+        if M.shape[0] == M.shape[1]:
+            return np.count_nonzero(M - np.diag(np.diagonal(M))) == 0
+        else:
+            return False  # Cannot be diagonal, cause not square.
+
+    def __repr__(self):
+        return '(%s %dx)' % (self.label, self.n)
+
+    def __str__(self):
+        return '(%s %dx)' % (self.label, self.n)
+
+
+class VectorBlock:
+    def __init__(self, lower_label: str, upper_label: str, M: np.ndarray):
+        if M.shape[0] != 3:
+            raise ValueError('Vector block must have first dimension 3, as it is a vector')
+        self.key:TransitionKey = TransitionKey(lower_label, upper_label)
+        self.matrix = M
+        self.parameters = {}
+
+        self.n = M.shape[1]
+        self.m = M.shape[2]
+
+    @property
+    def diagonal(self):
+        M = self.matrix
+        if M.shape[1] == M.shape[2]:
+            return np.count_nonzero(M[1] - np.diag(np.diagonal(M[1]))) == 0
+        else:
+            return False  # Cannot be diagonal, cause not square.
+
+    def return_block_in_place(self, i, j, N):
+        super_M = np.zeros((3, N, N), dtype='complex128')
+        super_M[:, i:i + self.n, j:j + self.m] = self.matrix
+        return super_M
+
+    def add_to_other_in_place(self, other, i, j, scale=1.):
+        """Adds self.matrix to the other matrix in position i,j"""
+        other[:, i:i + self.n, j:j + self.m] += scale * self.matrix
+
+
+class MuQBlock(VectorBlock):
+    def __init__(self, lower_label: str, upper_label: str, M: np.ndarray, muB: float):
+        super().__init__(lower_label, upper_label, M)
+        self.muB = muB
+
+
+class DQBlock(VectorBlock):
+    def __init__(self, lower_label: str, upper_label: str, M: np.ndarray, k: float, gamma: float):
+        super().__init__(lower_label, upper_label, M)
+        self.k = k
+        self.gamma = gamma
+
+
+class FullBlock:
+    mu_q: MuQBlock | None
+    d_q: DQBlock | None
+    h_0: H0Block | None
+
+    def __init__(self, n, m):
+        self.n: int = n
+        self.m: int = m
+
+    def add_mu_q(self, mu_q: MuQBlock):
+        if self.mu_q is not None:
+            raise ValueError("mu_q already added")
+        if self.n == mu_q.n and self.m == mu_q.m:
+            self.mu_q = mu_q
+        else:
+            raise ValueError("New mu_q block shape doesn't match existing block shape")
+
+    def add_d_q(self, d_q: DQBlock):
+        if self.d_q is not None:
+            raise ValueError("d_q already added")
+        if self.n == d_q.n and self.m == d_q.m:
+            self.d_q = d_q
+        else:
+            raise ValueError("New d_q block shape doesn't match existing block shape")
+
+    def add_H_0(self, h_0: H0Block):
+        if self.h_0 is not None:
+            raise ValueError("H_0 already added")
+        if self.n == h_0.n:
+            self.h_0 = h_0
+        else:
+            raise ValueError("H_0 block matrix doesn't match block shape")
+
+
+# endregion
+
 # Next, define a Hamiltonian class to work out the internal states:
+
+
 class Hamiltonian:
     """
     A representation of the Hamiltonian in blocks
@@ -55,76 +170,31 @@ class Hamiltonian:
         Total number of states in the Hamiltonian
     state_labels : list of char
         Updated list of the state labels used in the Hamiltonian.
-    laser_keys : dict
+    blocks_by_keys : dict
         The laser keys dictionary translates laser pumping keys like `g->e` into
         block indices for properly extracting the associated :math:`d_q` matrix.
     """
-    class block():
-        def __init__(self, label, M):
-            self.label = label
-            self.diagonal = self.check_diagonality(M)
-            self.matrix = M
-            self.parameters = {}
-
-            self.n = M.shape[0]
-            self.m = M.shape[1]
-
-        def check_diagonality(self, M):
-            if M.shape[0] == M.shape[1]:
-                return np.count_nonzero(M - np.diag(np.diagonal(M))) == 0
-            else:
-                return False # Cannot be diagonal, cause not square.
-
-        def return_block_in_place(self, i, j, N):
-            super_M = np.zeros((N, N), dtype='complex128')
-            super_M[i:i+self.n, j:j+self.m] = self.matrix
-
-            return super_M
-
-        def __repr__(self):
-            return '(%s %dx%d)' % (self.label, self.n, self.m)
-
-        def __str__(self):
-            return '(%s %dx%d)' % (self.label, self.n, self.m)
-
-
-    class vector_block(block):
-        def __init__(self, label, M):
-            super().__init__(label, M)
-
-            self.n = M.shape[1]
-            self.m = M.shape[2]
-
-        def check_diagonality(self, M):
-            if M.shape[1] == M.shape[2]:
-                return np.count_nonzero(M[1] - np.diag(np.diagonal(M[1]))) == 0
-            else:
-                return False # Cannot be diagonal, cause not square.
-
-        def return_block_in_place(self, i, j, N):
-            super_M = np.zeros((3, N, N), dtype='complex128')
-            super_M[:, i:i+self.n, j:j+self.m] = self.matrix
-
-            return super_M
-
 
     def __init__(self, *args, mass=1., muB=1, gamma=1., k=1):
-        self.blocks = []
+        self.blocks: list[list[FullBlock]] = []
         self.state_labels = []
         self.ns = []
-        self.laser_keys = {}
+        self.block_count = 0
+        self.n = 0
+        self.blocks_by_keys: dict[TransitionKey, FullBlock] = {}
+        self.d_q_by_keys: dict[TransitionKey, DQBlock]
         self.mass = mass
 
-        if len(args) == 5:
+        if len(args) == 5:  # TODO: replace this with clear overloads
             self.add_H_0_block('g', args[0])
             self.add_H_0_block('e', args[1])
-            self.add_mu_q_block('g', args[2], muB=muB)
-            self.add_mu_q_block('e', args[3], muB=muB)
+            self.add_mu_q_block('g', 'g', args[2], muB=muB)
+            self.add_mu_q_block('e', 'e', args[3], muB=muB)
 
             self.add_d_q_block('g', 'e', args[4], gamma=gamma, k=k)
-        elif len(args)>2:
-            raise ValueError('Unknown nummber of arguments.')
-        elif len(args)>0:
+        elif len(args) > 2:
+            raise ValueError('Unknown number of arguments.')
+        elif len(args) > 0:
             raise NotImplementedError('Not yet programmed for %d arguments.' %
                                       len(args))
 
@@ -143,57 +213,12 @@ class Hamiltonian:
         mass : float
             The mass of the atom or molecule of the Hamiltonian
         """
-        self.mass=mass
-
-    def __recompute_number_of_states(self):
-        self.n = 0
-        for block in np.diag(self.blocks):
-            if isinstance(block, tuple):
-                self.n += block[0].n
-            else:
-                self.n += block.n
-
-    def __search_elem_label(self, label):
-        ind = ()
-        for ii, row in enumerate(self.blocks):
-            for jj, element in enumerate(row):
-                if isinstance(element, self.block):
-                    if element.label == label:
-                        ind = (ii, jj)
-                        break;
-                elif isinstance(element, tuple):
-                    if np.any([element_i.label == label for element_i in element]):
-                        ind = (ii, jj)
-                        break;
-
-        return ind
-
-    def __make_elem_label(self, type, state_label):
-        if type == 'H_0' or type == 'mu_q':
-            if not isinstance(state_label, str):
-                raise TypeError('For type %s, state label %s must be a' +
-                                ' string.' % (type,state_label))
-            return '<%s|%s|%s>' % (state_label, type, state_label)
-        elif type == 'd_q':
-            if not isinstance(state_label, list):
-                raise TypeError('For type %s, state label %s must be a' +
-                                ' list of two strings.' % (type, state_label))
-            return '<%s|%s|%s>' % (state_label[0], type, state_label[1])
-        else:
-            raise ValueError('Matrix element type %s not understood' % type)
-
+        self.mass = mass
 
     def __add_new_row_and_column(self):
-        if len(self.blocks) == 0:
-            self.blocks = np.empty((1,1), dtype=object)
-        else:
-            blocks = np.empty((self.blocks.shape[0]+1,
-                               self.blocks.shape[1]+1), dtype=object)
-            blocks[:-1, :-1] = self.blocks
-            self.blocks = blocks
+        pass
 
-
-    def add_H_0_block(self, state_label, H_0):
+    def add_H_0_block(self, state_label, H_0: np.ndarray):
         """
         Adds a new H_0 block to the hamiltonian
 
@@ -205,69 +230,59 @@ class Hamiltonian:
             Square matrix that describes the field-independent part of this
             manifold's Hamiltonian.  This manifold must have N states.
         """
-        if H_0.shape[0] != H_0.shape[1]:
-            raise ValueError('H_0 must be square.')
-
-        ind_H_0 = self.__search_elem_label(self.__make_elem_label('H_0', state_label))
-        ind_mu_q = self.__search_elem_label(self.__make_elem_label('mu_q', state_label))
-
-        label = self.__make_elem_label('H_0', state_label)
-        if not ind_H_0 and not ind_mu_q:
-            self.__add_new_row_and_column()
-            self.blocks[-1, -1] = self.block(label, H_0.astype('complex128'))
-            self.state_labels.append(state_label)
-            self.ns.append(H_0.shape[0])
-        elif ind_mu_q:
-            if H_0.shape[0] != self.blocks[ind_H_0].n:
-                raise ValueError('Element %s is not the right shape to match mu_q.' % label)
-            self.blocks[ind_mu_q] = (self.block(label, H_0.astype('complex128')),
-                                     self.blocks[ind_mu_q])
-        else:
-            raise ValueError('H_0 already added.')
-
-        self.__recompute_number_of_states()
+        new_block = H0Block(state_label, H_0.astype('complex128'))
+        if state_label in self.state_labels:
+            raise ValueError("This state label is already used")
+        self.ns.append(new_block.n)
+        self.state_labels.append(state_label)
+        # region add new row and column, fill new column with empty FullBlock objects
+        self.blocks.append([])
+        self.block_count += 1
+        for i in range(self.block_count):
+            self.blocks[i][-1] = FullBlock(self.ns[i], new_block.n)
+            self.blocks_by_keys[TransitionKey(self.state_labels[i], new_block.label)] \
+                = FullBlock(new_block.n, self.ns[i])
+        # endregion
+        self.blocks[-1][-1].add_H_0(new_block)
+        self.n += new_block.n
         self.__check_diagonal_submatrices_are_themselves_diagonal()
 
+    def __validate_vector_block_and_get_full_block(self, vector_block: VectorBlock):
+        lower_label, upper_label = vector_block.key
+        if vector_block.matrix.shape[0] != 3:
+            raise ValueError()
+        if lower_label not in self.state_labels:
+            raise ValueError(f'Lower label {lower_label} not in state labels')
+        if upper_label not in self.state_labels:
+            raise ValueError(f'Upper label {upper_label} not in state labels')
+        block = self.blocks_by_keys[vector_block.key]
+        if block.n != vector_block.n or block.m != vector_block.m:
+            raise ValueError(
+                "Added vector block doesn't match the shape of the existing block on the same labels")
+        return block
 
-    def add_mu_q_block(self, state_label, mu_q, muB=1):
+    def add_mu_q_block(self, lower_label: str, upper_label: str, mu_q: np.ndarray, muB=1):
         r"""
-        Adds a new $\mu_q$ block to the hamiltonian
+        Add a new mu_q block to the Hamiltonian
 
         Parameters
         ----------
-        state_label : str
-            Label for the manifold for which this new block applies
-        mu_q : array_like, with shape (3, N, N)
-            Square matrix that describes the magnetic field dependent part of
-            this manifold's Hamiltonian.
+        lower_label
+            lala
+        upper_label
+            lala
+        mu_q
+            lala
+        muB
+            lala
         """
-        if mu_q.shape[0] != 3 or mu_q.shape[1] != mu_q.shape[2]:
-            raise ValueError('mu_q must 3xnxn, where n is an integer.')
-
-        ind_H_0 = self.__search_elem_label(self.__make_elem_label('H_0', state_label))
-        ind_mu_q = self.__search_elem_label(self.__make_elem_label('mu_q', state_label))
-
-        label = self.__make_elem_label('mu_q', state_label)
-        new_block = self.vector_block(label, mu_q.astype('complex128'))
-        new_block.parameters['mu_B'] = muB
-
-        if not ind_H_0 and not ind_mu_q:
-            self.__add_new_row_and_column()
-            self.blocks[-1, -1] = new_block
-            self.state_labels.append(state_label)
-            self.ns.append(mu_q.shape[1])
-        elif ind_H_0:
-            if mu_q.shape[1] != self.blocks[ind_H_0].n:
-                raise ValueError('Element %s is not the right shape to match H_0.' % label)
-            self.blocks[ind_H_0] = (self.blocks[ind_H_0], new_block)
-        else:
-            raise ValueError('mu_q already added.')
-
-        self.__recompute_number_of_states()
+        new_mu_q = MuQBlock(lower_label, upper_label, mu_q.astype('complex128'),muB)
+        block = self.__validate_vector_block_and_get_full_block(new_mu_q)
+        # TODO: consider making self.blocks upper-triangular and only ever adding the top bit
+        block.add_mu_q(new_mu_q)
         self.__check_diagonal_submatrices_are_themselves_diagonal()
 
-
-    def add_d_q_block(self, label1, label2, d_q, k=1, gamma=1):
+    def add_d_q_block(self, label1, label2, d_q: np.ndarray, k: float = 1., gamma: float = 1.):
         """
         Adds a new :math:`d_q` block to the hamiltonian to connect two
         manifolds together.
@@ -287,66 +302,10 @@ class Hamiltonian:
             The mangitude of the decay rate associated with this $d_q$ block.
             Default: 1
         """
-        ind_H_0 = self.__search_elem_label(self.__make_elem_label('H_0', label1))
-        ind_mu_q = self.__search_elem_label(self.__make_elem_label('mu_q', label1))
-
-        if ind_H_0 == () and ind_mu_q == ():
-            raise ValueError('Label %s not found.' % label1)
-        elif ind_H_0 == ():
-            ind1 = ind_mu_q[0]
-            n = self.blocks[ind_mu_q].n
-        elif ind_mu_q == ():
-            ind1 = ind_H_0[0]
-            n = self.blocks[ind_H_0].n
-        else:
-            ind1 = ind_H_0[0]
-            n = self.blocks[ind_H_0][0].n
-
-        ind_H_0 = self.__search_elem_label(self.__make_elem_label('H_0', label2))
-        ind_mu_q = self.__search_elem_label(self.__make_elem_label('mu_q', label2))
-
-        if ind_H_0 == () and ind_mu_q == ():
-            raise ValueError('Label %s not found.' % label1)
-        elif ind_H_0 == ():
-            ind2 = ind_mu_q[0]
-            m = self.blocks[ind_mu_q].n
-        elif ind_mu_q == ():
-            ind2 = ind_H_0[0]
-            m = self.blocks[ind_H_0].n
-        else:
-            ind2 = ind_H_0[0]
-            m = self.blocks[ind_H_0][0].n
-
-        # Check the size of d_q, make sure it is right:
-        if d_q.shape[1]!=n or d_q.shape[2]!=m:
-            raise ValueError('Expected size 3x%dx%d for %s, instead see 3x%dx%d'%
-                             (n, m, label, d_q.shape[1], d_q.shape[2]))
-
-        # what is the block index to store this d_q?
-        ind = (ind1, ind2)
-
-        # If we were given d_q^\dagger, flip it around
-        if ind1>ind2:
-            (label1, label2) = (label2, label1)
-            ind = ind[::-1]
-            d_q = d_q.conj().T
-
-        # Store the matrix d_q:
-        label = self.__make_elem_label('d_q', [label1, label2])
-        self.blocks[ind] = self.vector_block(label, d_q.astype('complex128'))
-        self.blocks[ind].parameters['k'] = k
-        self.blocks[ind].parameters['gamma'] = gamma
-
-        # Store the matrix d_q^\dagger
-        label = self.__make_elem_label('d_q', [label2, label1])
-        self.blocks[ind[::-1]] = self.vector_block(
-            label,
-            np.array([np.conjugate(d_q[ii].T) for ii in range(3)]).astype('complex128')
-            )
-
-        # Store the laser key for quick access:
-        self.laser_keys[TransitionKey(label1, label2)] = ind
-
+        new_d_q = DQBlock(label1, label2, d_q.astype('complex128'), k, gamma)
+        block = self.__validate_vector_block_and_get_full_block(new_d_q)
+        block.add_d_q(new_d_q)
+        self.d_q_by_keys[new_d_q.key] = new_d_q
 
     def make_full_matrices(self):
         """
@@ -376,33 +335,32 @@ class Hamiltonian:
         self.mu_q = np.zeros((3, self.n, self.n), dtype='complex128')
 
         n = 0
-        m = 0
 
         # First, return H_0 and mu_q:
         for diag_block in np.diag(self.blocks):
-            if isinstance(diag_block, self.vector_block):
-                self.mu_q += (diag_block.parameters['mu_B']*
-                              diag_block.return_block_in_place(n, n, self.n))
-                n+=diag_block.n
-            elif isinstance(diag_block, self.block):
+            if isinstance(diag_block, self.VectorBlock):
+                diag_block.add_to_other_in_place(self.mu_q, n, n,
+                                                 diag_block.parameters['mu_B'])
+            elif isinstance(diag_block, self.H0Block):
                 self.H_0 += diag_block.return_block_in_place(n, n, self.n)
-                n+=diag_block.n
+                n += diag_block.n
             else:
                 self.H_0 += diag_block[0].return_block_in_place(n, n, self.n)
-                self.mu_q += (diag_block[1].parameters['mu_B']*
+                self.mu_q += (diag_block[1].parameters['mu_B'] *
                               diag_block[1].return_block_in_place(n, n, self.n))
-                n+=diag_block[0].n
+                n += diag_block[0].n
 
         self.d_q_bare = {}
 
         # Next, return d_q:
         for ii in range(self.blocks.shape[0]):
-            for jj in range(ii+1, self.blocks.shape[1]):
+            for jj in range(ii + 1, self.blocks.shape[1]):
                 if not self.blocks[ii, jj] is None:
                     key = TransitionKey(self.state_labels[ii], self.state_labels[jj])
                     nstart = int(np.sum(self.ns[:ii]))
                     mstart = int(np.sum(self.ns[:jj]))
-                    self.d_q_bare[key] = self.blocks[ii, jj].return_block_in_place(nstart, mstart, self.n)
+                    self.d_q_bare[key] = self.blocks[ii, jj].return_block_in_place(nstart, mstart,
+                                                                                   self.n)
 
         self.d_q_star = {}
         for key in self.d_q_bare.keys():
@@ -420,7 +378,6 @@ class Hamiltonian:
         self.d = spherical2cart(self.d_q)
 
         return self.H_0, self.mu_q, self.d_q_bare, self.d_q_star
-
 
     def return_full_H(self, Eq, Bq):
         """
@@ -451,25 +408,23 @@ class Hamiltonian:
         H = self.H_0 - np.tensordot(self.mu_q, np.conjugate(Bq), axes=(0, 0))
 
         if isinstance(Eq, list) or isinstance(Eq, np.ndarray):
-            Eq = {TransitionKey('g', 'e'): Eq} # Promote to a dictionary.
+            Eq = {TransitionKey('g', 'e'): Eq}  # Promote to a dictionary.
 
         for key, val in Eq.items():
             for ii, q in enumerate([-1.0, 0.0, 1.0]):
-                H -= (0.5*(-1.)**q*self.d_q_bare[key][ii]*val[2-ii] +
-                      0.5*(-1.)**q*self.d_q_star[key][ii]*np.conjugate(val[2-ii]))
+                H -= (0.5 * (-1.) ** q * self.d_q_bare[key][ii] * val[2 - ii] +
+                      0.5 * (-1.) ** q * self.d_q_star[key][ii] * np.conjugate(val[2 - ii]))
 
         return H
 
-
     def __check_diagonal_submatrices_are_themselves_diagonal(self):
-        self.diagonal = np.zeros((self.blocks.shape[0],), dtype='bool')
-
+        self.diagonal = np.zeros(self.block_count, dtype='bool')
+        # TODO: fix this, maybe only do this before execution? or property? or whatever
         for ii, diag_block in enumerate(np.diag(self.blocks)):
             if isinstance(diag_block, tuple):
                 self.diagonal[ii] = (diag_block[0].diagonal and diag_block[1].diagonal)
             else:
                 self.diagonal[ii] = diag_block.diagonal
-
 
     def diag_static_field(self, B):
         r"""
@@ -495,8 +450,8 @@ class Hamiltonian:
         """
         # Now we get to the meat of it:
         if not (isinstance(B, float) or isinstance(B, int)):
-            raise ValueError('diag_static_field: the field should be given '+
-                             'by a single number, the magnitude (assumed '+
+            raise ValueError('diag_static_field: the field should be given ' +
+                             'by a single number, the magnitude (assumed ' +
                              'to be along z).')
 
         # If it does not already exist, make an empty Hamiltonian that has
@@ -507,15 +462,15 @@ class Hamiltonian:
                 self.rotated_hamiltonian.add_H_0_block(
                     self.state_labels[ii],
                     np.zeros((self.ns[ii], self.ns[ii]), dtype='complex128')
-                    )
+                )
             for ii, block_row in enumerate(self.blocks):
                 for jj, block in enumerate(block_row):
-                    if jj>ii:
+                    if jj > ii:
                         if not block is None:
                             self.rotated_hamiltonian.add_d_q_block(
                                 self.state_labels[ii], self.state_labels[jj],
                                 block.matrix,
-                                )
+                            )
 
         # Have we previously generated a set of transformation matrices?
         if not hasattr(self, 'U'):
@@ -527,15 +482,15 @@ class Hamiltonian:
                 self.U[ii] = np.eye(self.ns[ii])
 
         # Now, are any of the diagonal submatrices not diagonal?
-        if not np.all(self.diagonal) or B<0:
+        if not np.all(self.diagonal) or B < 0:
             # If so, go through all of the diagonal elements:
             for ii, diag_block in enumerate(np.diag(self.blocks)):
                 # It isn't? Diagonalize it:
-                if not self.diagonal[ii] or B<0:
+                if not self.diagonal[ii] or B < 0:
                     if isinstance(diag_block, tuple):
-                        H = (diag_block[0].matrix - B*diag_block[1].matrix[1])
-                    elif isinstance(diag_block, self.vector_block):
-                        H = -B*diag_block.matrix[1]
+                        H = (diag_block[0].matrix - B * diag_block[1].matrix[1])
+                    elif isinstance(diag_block, self.VectorBlock):
+                        H = -B * diag_block.matrix[1]
                     else:
                         H = diag_block.matrix
 
@@ -554,30 +509,31 @@ class Hamiltonian:
                         self.rotated_hamiltonian.blocks[ii, ii].matrix = np.diag(np.real(Es))
                     else:
                         raise ValueError('You broke the Hamiltonian!')
-                else: # It is diagonal:
+                else:  # It is diagonal:
                     if isinstance(diag_block, tuple):
                         self.rotated_hamiltonian.blocks[ii, ii].matrix = \
-                            diag_block[0].matrix - B*diag_block[1].matrix[1]
-                    elif isinstance(diag_block, self.vector_block):
+                            diag_block[0].matrix - B * diag_block[1].matrix[1]
+                    elif isinstance(diag_block, self.VectorBlock):
                         self.rotated_hamiltonian.blocks[ii, ii].matrix = \
-                            -B*diag_block.matrix[1]
+                            -B * diag_block.matrix[1]
                     else:
                         self.rotated_hamiltonian.blocks[ii, ii].matrix = \
                             diag_block.matrix
 
             # Now, rotate the d_q:
             for ii in range(self.blocks.shape[0]):
-                for jj in range(ii+1, self.blocks.shape[1]):
-                    if (not self.blocks[ii, jj] is None) and (not self.diagonal[ii] or not self.diagonal[jj] or B<0):
+                for jj in range(ii + 1, self.blocks.shape[1]):
+                    if (not self.blocks[ii, jj] is None) and (
+                            not self.diagonal[ii] or not self.diagonal[jj] or B < 0):
                         for kk in range(3):
                             self.rotated_hamiltonian.blocks[ii, jj].matrix[kk] = \
-                                self.U[ii].T @ self.blocks[ii,jj].matrix[kk] @ self.U[jj]
+                                self.U[ii].T @ self.blocks[ii, jj].matrix[kk] @ self.U[jj]
 
                             self.rotated_hamiltonian.blocks[jj, ii].matrix[kk] = \
                                 np.conjugate(self.rotated_hamiltonian.blocks[ii, jj].matrix[kk].T)
 
                             if (self.rotated_hamiltonian.blocks[ii, jj].matrix.shape !=
-                                self.blocks[ii,jj].matrix.shape):
+                                    self.blocks[ii, jj].matrix.shape):
                                 raise ValueError("Rotataed d_q not the same size as original.")
         else:
             # We are already diagonal, so all we have to do is change the
@@ -585,16 +541,15 @@ class Hamiltonian:
             for ii, diag_block in enumerate(np.diag(self.blocks)):
                 if isinstance(diag_block, tuple):
                     self.rotated_hamiltonian.blocks[ii, ii].matrix = \
-                        np.real(diag_block[0].matrix - B*diag_block[1].matrix[1])
-                elif isinstance(diag_block, self.vector_block):
+                        np.real(diag_block[0].matrix - B * diag_block[1].matrix[1])
+                elif isinstance(diag_block, self.VectorBlock):
                     self.rotated_hamiltonian.blocks[ii, ii].matrix = \
-                        np.real(-B*diag_block.matrix[1])
+                        np.real(-B * diag_block.matrix[1])
                 else:
                     self.rotated_hamiltonian.blocks[ii, ii].matrix = \
                         np.real(diag_block.matrix)
 
         return self.rotated_hamiltonian
-
 
     def diag_H_0(self, B0):
         pass

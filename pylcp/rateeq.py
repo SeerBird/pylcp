@@ -8,6 +8,7 @@ import numpy as np
 from scipy.integrate import solve_ivp
 from scipy.interpolate import interp1d
 
+from . import MagField, Hamiltonian
 from .common import (Progressbar, random_vector, BaseForceProfile)
 from .governingeq import GoverningEq
 from .integration_tools import solve_ivp_random
@@ -18,7 +19,7 @@ from .typing import RateEqEvolutionMatrices
 def abs2(x):
     return x.real**2 + x.imag**2
 
-class force_profile(BaseForceProfile):
+class ForceProfile(BaseForceProfile):
     """
     Rate equation force profile
 
@@ -57,8 +58,8 @@ class force_profile(BaseForceProfile):
         for key in laserBeams:
             self.Rijl[key] = np.zeros(
                 self.R[0].shape+(len(laserBeams[key].beam_vector),
-                hamiltonian.blocks[hamiltonian.laser_keys[key]].n,
-                hamiltonian.blocks[hamiltonian.laser_keys[key]].m)
+                hamiltonian.blocks_by_keys[key].n,
+                hamiltonian.blocks_by_keys[key].m)
                 )
 
     def store_data(self, ind, Neq, F, F_laser, F_mag, Rijl):
@@ -105,7 +106,7 @@ class RateEq(GoverningEq):
     v0 : array_like, shape (3,), optional
         Initial velocity.  Default: [0., 0., 0.]
     """
-    def __init__(self, laserBeams, magField, hamiltonian,
+    def __init__(self, laserBeams, magField:MagField, hamiltonian:Hamiltonian,
                  a=np.array([0., 0., 0.]), include_mag_forces=True,
                  svd_eps=1e-10, r0=np.array([0., 0., 0.]),
                  v0=np.array([0., 0., 0.])):
@@ -113,6 +114,8 @@ class RateEq(GoverningEq):
         # hamiltonian.
         super().__init__(laserBeams, magField, hamiltonian,
                          a=a, r0=r0, v0=v0)
+        if self.hamiltonian is None:
+            raise ValueError("RateEq hamiltonian cannot be None")
 
         self.include_mag_forces = include_mag_forces
         self.svd_eps = svd_eps
@@ -134,10 +137,8 @@ class RateEq(GoverningEq):
 
         # Save the recoil velocity for the relevant transitions:
         self.recoil_velocity = {}
-        for key in self.hamiltonian.laser_keys:
-            self.recoil_velocity[key] = \
-                self.hamiltonian.blocks[self.hamiltonian.laser_keys[key]].parameters['k']\
-                /self.hamiltonian.mass
+        for key in self.hamiltonian.d_q_by_keys:
+            self.recoil_velocity[key] = self.hamiltonian.d_q_by_keys[key].k/self.hamiltonian.mass
 
         # A dictionary to store the pumping rates.
         self.Rijl = {}
@@ -164,9 +165,9 @@ class RateEq(GoverningEq):
         # be significantly slower.
 
         # Let's use the laser_keys dictionary to go through the non-zero d_q:
-        for key in self.hamiltonian.laser_keys:
+        for key in self.hamiltonian.blocks_by_keys:
             # The index of the current d_q matrix:
-            ind = rotated_ham.laser_keys[key]
+            ind = rotated_ham.blocks_by_keys[key]
 
             # Grab the block of interest:
             d_q_block = rotated_ham.blocks[ind]
@@ -219,7 +220,7 @@ class RateEq(GoverningEq):
         """
         for key in self.laserBeams:
             # Extract the relevant d_q matrix:
-            ind = self.hamiltonian.rotated_hamiltonian.laser_keys[key]
+            ind = self.hamiltonian.rotated_hamiltonian.blocks_by_keys[key]
             d_q = self.hamiltonian.rotated_hamiltonian.blocks[ind].matrix
             gamma = self.hamiltonian.blocks[ind].parameters['gamma']
 
@@ -253,7 +254,7 @@ class RateEq(GoverningEq):
     def _add_pumping_rates_to_Rev(self):
         # Now add the pumping rates into the rate equation propogation matrix:
         for key in self.laserBeams:
-            ind = self.hamiltonian.rotated_hamiltonian.laser_keys[key]
+            ind = self.hamiltonian.rotated_hamiltonian.blocks_by_keys[key]
 
             n_off = sum(self.hamiltonian.rotated_hamiltonian.ns[:ind[0]])
             n = self.hamiltonian.rotated_hamiltonian.ns[ind[0]]
@@ -411,7 +412,7 @@ class RateEq(GoverningEq):
         for key in self.laserBeams:
             f[key] = np.zeros((3, len(self.laserBeams[key].beam_vector)))
 
-            ind = self.hamiltonian.laser_keys[key]
+            ind = self.hamiltonian.blocks_by_keys[key]
             n_off = sum(self.hamiltonian.ns[:ind[0]])
             n = self.hamiltonian.ns[ind[0]]
             m_off = sum(self.hamiltonian.ns[:ind[1]])
@@ -437,7 +438,7 @@ class RateEq(GoverningEq):
                         fmag += np.sum(np.real(
                             block[1].matrix[1] @ N[ind1:ind2]
                             ))*gradBmag
-                    elif isinstance(block, self.hamiltonian.vector_block):
+                    elif isinstance(block, self.hamiltonian.VectorBlock):
                         fmag += np.sum(np.real(
                             block.matrix[1] @ N[ind1:ind2]
                             ))*gradBmag
@@ -446,7 +447,7 @@ class RateEq(GoverningEq):
                         fmag += np.sum(np.real(
                             self.hamiltonian.U[ii].T @ block[1].matrix[1] @
                             self.hamiltonian.U[ii]) @ N[ind1:ind2])*gradBmag
-                    elif isinstance(block, self.hamiltonian.vector_block):
+                    elif isinstance(block, self.hamiltonian.VectorBlock):
                         fmag += np.sum(np.real(
                             self.hamiltonian.U[ii].T @ block.matrix[1] @
                             self.hamiltonian.U[ii]) @ N[ind1:ind2])*gradBmag
@@ -800,14 +801,14 @@ class RateEq(GoverningEq):
 
         Returns
         -------
-        profile : pylcp.rateeq.force_profile
+        profile : pylcp.rateeq.ForceProfile
             Resulting force profile.
         """
         if not name:
             name = '{0:d}'.format(len(self.profile))
 
-        self.profile[name] = force_profile(R, V, self.laserBeams,
-                                           self.hamiltonian)
+        self.profile[name] = ForceProfile(R, V, self.laserBeams,
+                                          self.hamiltonian)
 
         it = np.nditer([R[0], R[1], R[2], V[0], V[1], V[2]],
                        flags=['refs_ok', 'multi_index'],

@@ -10,6 +10,57 @@ from .fields import MagField, LaserBeams
 from .typing import TransitionKey, Dependence
 from scipy.optimize import root_scalar, root
 
+
+class SystemEvaluator:
+    """Base strategy for evaluating system evolution matrices."""
+
+    def __init__(self, eq):
+        self.eq = eq
+
+    def evaluate_obe(self, r, t):
+        raise NotImplementedError
+
+    def evaluate_rateeq(self, r, t):
+        raise NotImplementedError
+
+
+class StaticEvaluator(SystemEvaluator):
+    """
+    Tier 1 Evaluator: Used when fields are CONSTANT or POSITION_ONLY.
+    Time 't' is ignored entirely during ODE evolution matrix evaluation.
+    """
+
+    def evaluate_obe(self, r, t):
+        return self.eq._compute_obe_ev_spatial(r, t=0.0)
+
+    def evaluate_rateeq(self, r, t):
+        return self.eq._compute_rateeq_ev_spatial(r, t=0.0)
+
+
+class TimeSeparableEvaluator(SystemEvaluator):
+    """
+    Tier 2 Evaluator: Used when fields have simple time dependence (e.g. detuning/amplitude ramps).
+    """
+
+    def evaluate_obe(self, r, t):
+        return self.eq._compute_obe_ev_spatial(r, t)
+
+    def evaluate_rateeq(self, r, t):
+        return self.eq._compute_rateeq_ev_spatial(r, t)
+
+
+class FullDynamicEvaluator(SystemEvaluator):
+    """
+    Tier 3 Evaluator: Used when fields have full spatio-temporal (R, t) dependence.
+    """
+
+    def evaluate_obe(self, r, t):
+        return self.eq._compute_obe_ev_full(r, t)
+
+    def evaluate_rateeq(self, r, t):
+        return self.eq._compute_rateeq_ev_full(r, t)
+
+
 class GoverningEq(object):
     """
     Governing equation base class
@@ -83,7 +134,7 @@ class GoverningEq(object):
             # Next, check to see if there is consistency in k:
             # Check that laser beam keys and Hamiltonian keys match.
             for laser_key in self.laserBeams.keys():
-                if not laser_key in self.hamiltonian.laser_keys.keys():
+                if not laser_key in self.hamiltonian.blocks_by_keys.keys():
                     raise ValueError(f'laserBeams dictionary key {laser_key} ' +
                                      'does not have a corresponding key in the ' +
                                      'Hamiltonian d_q.')
@@ -91,7 +142,7 @@ class GoverningEq(object):
 
         # Check the acceleration:
         if not isinstance(a, np.ndarray):
-            raise TypeError('Constant acceleration must be an numpy array.')
+            raise TypeError('Constant acceleration must be a numpy array.')
         elif a.size != 3:
             raise ValueError('Constant acceleration must have length 3.')
         else:
@@ -106,6 +157,23 @@ class GoverningEq(object):
         # Set an attribute for the equillibrium position:
         self.r_eq = None
 
+        # Instantiate evaluator strategy:
+        self.evaluator = self._create_evaluator()
+
+    @property
+    def dependence(self) -> Dependence:
+        laser_deps = [lb.dependence for lb in self.laserBeams.values()] if self.laserBeams else [Dependence.CONSTANT]
+        mag_dep = self.magField.dependence if hasattr(self, 'magField') else Dependence.CONSTANT
+        return max([mag_dep] + laser_deps)
+
+    def _create_evaluator(self) -> SystemEvaluator:
+        dep = self.dependence
+        if dep <= Dependence.POSITION_ONLY:
+            return StaticEvaluator(self)
+        elif dep == Dependence.TIME_ONLY:
+            return TimeSeparableEvaluator(self)
+        else:
+            return FullDynamicEvaluator(self)
 
 
     def set_initial_position_and_velocity(self, r0, v0):

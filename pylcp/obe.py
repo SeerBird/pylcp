@@ -11,6 +11,8 @@ import scipy.sparse as sparse
 from scipy.integrate import solve_ivp
 from scipy.interpolate import interp1d
 
+from .fields import MagField, LaserBeams
+from .hamiltonian import Hamiltonian
 from .common import (Progressbar, random_vector, cart2spherical, spherical2cart, BaseForceProfile)
 from .governingeq import GoverningEq
 from .integration_tools import solve_ivp_random
@@ -143,14 +145,15 @@ class OBE(GoverningEq):
     Methods
     -------
     """
-    def __init__(self, laserBeams, magField, hamiltonian,
+    hamiltonian:Hamiltonian
+    def __init__(self, laserBeams, magField:MagField, hamiltonian:Hamiltonian,
                  a=np.array([0., 0., 0.]), transform_into_re_im=True,
                  use_sparse_matrices=None, include_mag_forces=True,
                  r0=np.array([0., 0., 0.]), v0=np.array([0., 0., 0.])):
-
         super().__init__(laserBeams, magField, hamiltonian, a=a,
                          r0=r0, v0=v0)
-
+        if self.hamiltonian is None:
+            raise ValueError("OBE needs to be defined with a hamiltonian")
         # Save the optional arguments:
         self.transform_into_re_im = transform_into_re_im
         self.include_mag_forces = include_mag_forces
@@ -173,7 +176,7 @@ class OBE(GoverningEq):
         # There will be time-dependent and time-independent components of the optical
         # Bloch equations.  The time-independent parts are related to spontaneous
         # emission, applied magnetic field, and the zero-field Hamiltonian.  We
-        # compute the latter-two directly from the commuatator.
+        # compute the latter-two directly from the commutator.
 
         # Build the matricies that control evolution:
         self.ev_mat = OBEEvolutionMatrices()
@@ -218,23 +221,23 @@ class OBE(GoverningEq):
 
 
     def __build_coherent_ev(self):
-        self.ev_mat['H0'] = self.__build_coherent_ev_submatrix(
+        self.ev_mat.h0 = self.__build_coherent_ev_submatrix(
             self.hamiltonian.H_0
         )
 
-        self.ev_mat['B'] = [None]*3
+        self.ev_mat.magnetic = [None]*3
         for q in range(3):
-            self.ev_mat['B'][q] = self.__build_coherent_ev_submatrix(
+            self.ev_mat.magnetic[q] = self.__build_coherent_ev_submatrix(
                 self.hamiltonian.mu_q[q]
             )
-        self.ev_mat['B'] = np.array(self.ev_mat['B'])
+        self.ev_mat.magnetic = np.array(self.ev_mat.magnetic)
 
-        self.ev_mat['d_q'] = {}
-        self.ev_mat['d_q*'] = {}
+        self.ev_mat.d_q = {}
+        self.ev_mat.d_q_conj = {}
         for key in self.laserBeams.keys():
-            gamma = self.hamiltonian.blocks[self.hamiltonian.laser_keys[key]].parameters['gamma']
-            self.ev_mat['d_q'][key] = [None]*3
-            self.ev_mat['d_q*'][key] = [None]*3
+            gamma = self.hamiltonian.blocks_by_keys[key].d_q.gamma
+            self.ev_mat.d_q[key] = [None]*3
+            self.ev_mat.d_q_conj[key] = [None]*3
             for q in range(3):
                 self.ev_mat['d_q'][key][q] = self.__build_coherent_ev_submatrix(
                     gamma*self.hamiltonian.d_q_bare[key][q]/4.
@@ -259,7 +262,7 @@ class OBE(GoverningEq):
         self.decay_rho_indices = {}
         self.recoil_velocity = {}
 
-        self.ev_mat['decay'] = np.zeros((self.hamiltonian.n**2,
+        self.ev_mat.decay = np.zeros((self.hamiltonian.n**2,
                                          self.hamiltonian.n**2),
                                         dtype='complex128')
 
@@ -267,7 +270,7 @@ class OBE(GoverningEq):
         for key in d_q_bare:
             ev_mat = np.zeros((self.hamiltonian.n**2, self.hamiltonian.n**2),
                                dtype='complex128')
-            gamma = self.hamiltonian.blocks[self.hamiltonian.laser_keys[key]].parameters['gamma']
+            gamma = self.hamiltonian.blocks[self.hamiltonian.blocks_by_keys[key]].parameters['gamma']
 
             # The first index we want to capture:
             for ii in range(self.hamiltonian.n):
@@ -311,7 +314,7 @@ class OBE(GoverningEq):
                 for ii, rate in enumerate(self.decay_rates[key]) if rate>0]
             )
             self.recoil_velocity[key] = \
-                self.hamiltonian.blocks[self.hamiltonian.laser_keys[key]].parameters['k']\
+                self.hamiltonian.blocks[self.hamiltonian.blocks_by_keys[key]].parameters['k']\
                 /self.hamiltonian.mass
 
             self.ev_mat['decay'] += ev_mat
@@ -958,7 +961,7 @@ class OBE(GoverningEq):
             # First, determine the average mu_q:
             # This returns a (3,) + rho.shape[2:] array
             mu_q_av = self.observable(self.hamiltonian.d_q_bare[key], rho)
-            gamma = self.hamiltonian.blocks[self.hamiltonian.laser_keys[key]].parameters['gamma']
+            gamma = self.hamiltonian.blocks[self.hamiltonian.blocks_by_keys[key]].parameters['gamma']
 
             if not return_details:
                 delE = self.laserBeams[key].total_electric_field_gradient(np.real(r), t)
