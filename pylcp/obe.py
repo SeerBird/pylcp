@@ -203,21 +203,16 @@ class OBE(GoverningEq):
     def __build_coherent_ev_submatrix(self, H):
         """
         This method builds the coherent evolution based on a submatrix of the
-        Hamiltonian H.  In practice, one must be careful about commutators if
-        one breaks up the Hamiltonian.
+        Hamiltonian H using vectorized Kronecker products.
         """
-        ev_mat = np.zeros((self.hamiltonian.n**2, self.hamiltonian.n**2),
-                               dtype='complex128')
-
-        for ii in range(self.hamiltonian.n):
-            for jj in range(self.hamiltonian.n):
-                for kk in range(self.hamiltonian.n):
-                    ev_mat[self.__density_index(ii, jj),
-                           self.__density_index(ii, kk)] += 1j*H[kk, jj]
-                    ev_mat[self.__density_index(ii, jj),
-                           self.__density_index(kk, jj)] -= 1j*H[ii, kk]
-
-        return ev_mat
+        n = self.hamiltonian.n
+        if getattr(self, 'use_sparse_matrices', False):
+            In = sparse.eye(n, dtype='complex128', format='csr')
+            H_sp = sparse.csr_matrix(H)
+            return 1j * (sparse.kron(H_sp.T, In, format='csr') - sparse.kron(In, H_sp, format='csr'))
+        else:
+            In = np.eye(n, dtype='complex128')
+            return 1j * (np.kron(H.T, In) - np.kron(In, H))
 
 
     def __build_coherent_ev(self):
