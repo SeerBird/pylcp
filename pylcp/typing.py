@@ -159,7 +159,6 @@ class FieldParameter:
             return self.val(R, t)
 
 
-@dataclass(frozen=True, slots=True)
 class TransitionKey(NamedTuple):
     """Strongly typed representation of an atomic transition key (e.g. g->e)."""
     ground: str
@@ -167,6 +166,16 @@ class TransitionKey(NamedTuple):
 
     def __str__(self) -> str:
         return f"{self.ground}->{self.excited}"
+
+
+@dataclass(frozen=True, slots=True)
+class Manifold:
+    """Strongly typed representation of an atomic/molecular state manifold (e.g. ground 'g' with N=3 states)."""
+    label: str
+    n: int
+
+    def __repr__(self) -> str:
+        return f"Manifold({self.label}, n={self.n})"
 
 
 @dataclass

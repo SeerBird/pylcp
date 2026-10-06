@@ -8,7 +8,8 @@ import numpy as np
 from scipy.integrate import solve_ivp
 from scipy.interpolate import interp1d
 
-from . import MagField, Hamiltonian
+from .fields import MagField
+from .hamiltonian import Hamiltonian
 from .common import (Progressbar, random_vector, BaseForceProfile)
 from .governingeq import GoverningEq
 from .integration_tools import solve_ivp_random

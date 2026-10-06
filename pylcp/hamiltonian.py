@@ -1,7 +1,8 @@
+from __future__ import annotations
 import numpy as np
 
 from .common import spherical2cart
-from .typing import TransitionKey
+from .typing import TransitionKey, Manifold
 
 
 # region blocks
@@ -41,7 +42,7 @@ class VectorBlock:
     def __init__(self, lower_label: str, upper_label: str, M: np.ndarray):
         if M.shape[0] != 3:
             raise ValueError('Vector block must have first dimension 3, as it is a vector')
-        self.key:TransitionKey = TransitionKey(lower_label, upper_label)
+        self.key: TransitionKey = TransitionKey(lower_label, upper_label)
         self.matrix = M
         self.parameters = {}
 
@@ -84,9 +85,53 @@ class FullBlock:
     d_q: DQBlock | None
     h_0: H0Block | None
 
-    def __init__(self, n, m):
+    def __init__(self, n: int, m: int, noffset: int, moffset: int):
         self.n: int = n
         self.m: int = m
+        self.noffset: int = noffset
+        self.moffset: int = moffset
+        self.h_0: H0Block | None = None
+        self.mu_q: MuQBlock | None = None
+        self.d_q: DQBlock | None = None
+
+    @property
+    def row_slice(self) -> slice:
+        return slice(self.noffset, self.noffset + self.n)
+
+    @property
+    def col_slice(self) -> slice:
+        return slice(self.moffset, self.moffset + self.m)
+
+    @property
+    def state_slices(self) -> tuple[slice, slice]:
+        """Returns 2D (row_slice, col_slice) in N_total x N_total space."""
+        return self.row_slice, self.col_slice
+
+    @property
+    def is_diagonal(self) -> bool:
+        return self.n == self.m
+
+    @property
+    def is_empty(self) -> bool:
+        return self.h_0 is None and self.mu_q is None and self.d_q is None
+
+    @property
+    def has_h_0(self) -> bool:
+        return self.h_0 is not None
+
+    @property
+    def has_mu_q(self) -> bool:
+        return self.mu_q is not None
+
+    @property
+    def has_d_q(self) -> bool:
+        return self.d_q is not None
+
+    @property
+    def diagonal(self) -> bool:
+        h0_diag = self.h_0.diagonal if self.h_0 is not None else True
+        mu_diag = self.mu_q.diagonal if self.mu_q is not None else True
+        return h0_diag and mu_diag
 
     def add_mu_q(self, mu_q: MuQBlock):
         if self.mu_q is not None:
@@ -105,6 +150,8 @@ class FullBlock:
             raise ValueError("New d_q block shape doesn't match existing block shape")
 
     def add_H_0(self, h_0: H0Block):
+        if not self.is_diagonal:
+            raise ValueError("H_0 can only be added to diagonal blocks")
         if self.h_0 is not None:
             raise ValueError("H_0 already added")
         if self.n == h_0.n:
@@ -114,8 +161,6 @@ class FullBlock:
 
 
 # endregion
-
-# Next, define a Hamiltonian class to work out the internal states:
 
 
 class Hamiltonian:
@@ -176,13 +221,12 @@ class Hamiltonian:
     """
 
     def __init__(self, *args, mass=1., muB=1, gamma=1., k=1):
-        self.blocks: list[list[FullBlock]] = []
+        self.blocks: list[list[FullBlock]] = []  # rows of columns of FullBlocks
         self.state_labels = []
         self.ns = []
-        self.block_count = 0
         self.n = 0
         self.blocks_by_keys: dict[TransitionKey, FullBlock] = {}
-        self.d_q_by_keys: dict[TransitionKey, DQBlock]
+        self.d_q_by_keys: dict[TransitionKey, DQBlock] = {}
         self.mass = mass
 
         if len(args) == 5:  # TODO: replace this with clear overloads
@@ -215,9 +259,6 @@ class Hamiltonian:
         """
         self.mass = mass
 
-    def __add_new_row_and_column(self):
-        pass
-
     def add_H_0_block(self, state_label, H_0: np.ndarray):
         """
         Adds a new H_0 block to the hamiltonian
@@ -235,17 +276,45 @@ class Hamiltonian:
             raise ValueError("This state label is already used")
         self.ns.append(new_block.n)
         self.state_labels.append(state_label)
-        # region add new row and column, fill new column with empty FullBlock objects
-        self.blocks.append([])
-        self.block_count += 1
+        self.blocks.append([]) # add new column
+        moffset = 0
+        # region fill in last column with new FullBlocks
         for i in range(self.block_count):
-            self.blocks[i][-1] = FullBlock(self.ns[i], new_block.n)
-            self.blocks_by_keys[TransitionKey(self.state_labels[i], new_block.label)] \
-                = FullBlock(new_block.n, self.ns[i])
+            full_block = FullBlock(self.ns[i],new_block.n, moffset, self.n)
+            self.blocks[i].append(full_block)
+            self.blocks_by_keys[TransitionKey(self.state_labels[i], state_label)] = full_block
+            moffset += self.ns[i]
         # endregion
         self.blocks[-1][-1].add_H_0(new_block)
         self.n += new_block.n
         self.__check_diagonal_submatrices_are_themselves_diagonal()
+
+    @property
+    def block_count(self):
+        return len(self.blocks)
+
+    def get_state_slice(self, label: str) -> slice:
+        """Returns 1D slice in state space N_total for a manifold label."""
+        idx = self.state_labels.index(label)
+        offset = sum(self.ns[:idx])
+        return slice(offset, offset + self.ns[idx])
+
+    def get_vec_slice(self, key: TransitionKey) -> tuple[slice, slice]:
+        """Returns 2D (row_slice, col_slice) in N_total x N_total space for a TransitionKey."""
+        if key not in self.blocks_by_keys:
+            raise KeyError(
+                f"TransitionKey '{key}' not found. Keys must be specified in increasing energy order."
+            )
+        block = self.blocks_by_keys[key]
+        return block.row_slice, block.col_slice
+
+    def get_vec_indices(self, key: TransitionKey) -> np.ndarray:
+        """Returns 1D flat index array in vectorized density matrix space N_total^2."""
+        row_slice, col_slice = self.get_vec_slice(key)
+        row_idx = np.arange(row_slice.start, row_slice.stop)
+        col_idx = np.arange(col_slice.start, col_slice.stop)
+        ii, jj = np.meshgrid(row_idx, col_idx, indexing='ij')
+        return (ii + jj * self.n).ravel()
 
     def __validate_vector_block_and_get_full_block(self, vector_block: VectorBlock):
         lower_label, upper_label = vector_block.key
@@ -276,7 +345,7 @@ class Hamiltonian:
         muB
             lala
         """
-        new_mu_q = MuQBlock(lower_label, upper_label, mu_q.astype('complex128'),muB)
+        new_mu_q = MuQBlock(lower_label, upper_label, mu_q.astype('complex128'), muB)
         block = self.__validate_vector_block_and_get_full_block(new_mu_q)
         # TODO: consider making self.blocks upper-triangular and only ever adding the top bit
         block.add_mu_q(new_mu_q)
@@ -419,12 +488,9 @@ class Hamiltonian:
 
     def __check_diagonal_submatrices_are_themselves_diagonal(self):
         self.diagonal = np.zeros(self.block_count, dtype='bool')
-        # TODO: fix this, maybe only do this before execution? or property? or whatever
-        for ii, diag_block in enumerate(np.diag(self.blocks)):
-            if isinstance(diag_block, tuple):
-                self.diagonal[ii] = (diag_block[0].diagonal and diag_block[1].diagonal)
-            else:
-                self.diagonal[ii] = diag_block.diagonal
+        for ii in range(self.block_count):
+            diag_block = self.blocks[ii][0]
+            self.diagonal[ii] = diag_block.diagonal
 
     def diag_static_field(self, B):
         r"""
