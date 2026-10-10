@@ -116,18 +116,6 @@ class FullBlock:
         return self.h_0 is None and self.mu_q is None and self.d_q is None
 
     @property
-    def has_h_0(self) -> bool:
-        return self.h_0 is not None
-
-    @property
-    def has_mu_q(self) -> bool:
-        return self.mu_q is not None
-
-    @property
-    def has_d_q(self) -> bool:
-        return self.d_q is not None
-
-    @property
     def diagonal(self) -> bool:
         h0_diag = self.h_0.diagonal if self.h_0 is not None else True
         mu_diag = self.mu_q.diagonal if self.mu_q is not None else True
@@ -221,7 +209,8 @@ class Hamiltonian:
     """
 
     def __init__(self, *args, mass=1., muB=1, gamma=1., k=1):
-        self.blocks: list[list[FullBlock]] = []  # rows of columns of FullBlocks
+        self.blocks: list[list[FullBlock]] = []  # rows of columns of FullBlocks, upper-triangular;
+        # self.blocks[i][0] is the ith diagonal element, each row has n-i elements
         self.state_labels = []
         self.ns = []
         self.n = 0
@@ -376,7 +365,7 @@ class Hamiltonian:
         block.add_d_q(new_d_q)
         self.d_q_by_keys[new_d_q.key] = new_d_q
 
-    def make_full_matrices(self):
+    def make_full_matrices(self): # TODO: I think we're not using this anymore, so remove usages
         """
         Returns the full matrices that define the Hamiltonian.
 

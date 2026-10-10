@@ -98,23 +98,25 @@ class GoverningEq(object):
         Initial velocity.  Default: [0.,0.,0.]
     """
 
-    def __init__(self, laserBeams, magField:MagField, hamiltonian:Hamiltonian|None=None,
+    def __init__(self, laserBeams, magField: MagField, hamiltonian: Hamiltonian | None = None,
                  a=np.array([0., 0., 0.]), r0=np.array([0., 0., 0.]),
                  v0=np.array([0., 0., 0.])):
         self.set_initial_position_and_velocity(r0, v0)
 
         # Add lasers:
         default_tk = TransitionKey('g', 'e')
-        self.laserBeams = {}
+        self.laserBeams: dict[TransitionKey, LaserBeams] = {}
         if isinstance(laserBeams, list):
             # TODO: check the list contains LaserBeam objects
             self.laserBeams[default_tk] = copy.copy(LaserBeams(laserBeams))
         elif isinstance(laserBeams, LaserBeams):
             self.laserBeams[default_tk] = copy.copy(laserBeams)
         elif isinstance(laserBeams, dict):
-            for key, val in laserBeams.items():
+            key: TransitionKey
+            laserBeams: dict[TransitionKey, LaserBeams]
+            for key in laserBeams:
                 # TODO: check keys and values are valid
-                self.laserBeams[key] = copy.copy(val)
+                self.laserBeams[key] = copy.copy(laserBeams[key])
         else:
             raise TypeError('laserBeams is not a valid type.')
 
@@ -139,7 +141,6 @@ class GoverningEq(object):
                                      'does not have a corresponding key in the ' +
                                      'Hamiltonian d_q.')
 
-
         # Check the acceleration:
         if not isinstance(a, np.ndarray):
             raise TypeError('Constant acceleration must be a numpy array.')
@@ -162,7 +163,8 @@ class GoverningEq(object):
 
     @property
     def dependence(self) -> Dependence:
-        laser_deps = [lb.dependence for lb in self.laserBeams.values()] if self.laserBeams else [Dependence.CONSTANT]
+        laser_deps = [lb.dependence for lb in self.laserBeams.values()] if self.laserBeams else [
+            Dependence.CONSTANT]
         mag_dep = self.magField.dependence if hasattr(self, 'magField') else Dependence.CONSTANT
         return max([mag_dep] + laser_deps)
 
@@ -174,7 +176,6 @@ class GoverningEq(object):
             return TimeSeparableEvaluator(self)
         else:
             return FullDynamicEvaluator(self)
-
 
     def set_initial_position_and_velocity(self, r0, v0):
         """
@@ -302,8 +303,8 @@ class GoverningEq(object):
 
             return F[axes]
 
-        #print('Initial guess: %s' % r_eqi[axes])
-        if len(axes)>1:
+        # print('Initial guess: %s' % r_eqi[axes])
+        if len(axes) > 1:
             result = root(simple_wrapper, **kwargs)
             self.r_eq[axes] = result.x
         else:
@@ -343,10 +344,10 @@ class GoverningEq(object):
             The trapping frequencies along the selected axes.
         """
         axes = np.asarray(axes)
-        omega = np.zeros(3,)
+        omega = np.zeros(3, )
 
         if isinstance(eps, float):
-            eps = np.array([eps]*3)
+            eps = np.array([eps] * 3)
 
         if r is None and self.r_eq is None:
             r = np.array([0., 0., 0.])
@@ -362,7 +363,7 @@ class GoverningEq(object):
 
         for axis in axes:
             if not np.isnan(r[axis]):
-                rpmdri = np.tile(r, (2,1)).T
+                rpmdri = np.tile(r, (2, 1)).T
                 rpmdri[axis, 1] += eps[axis]
                 rpmdri[axis, 0] -= eps[axis]
 
@@ -374,8 +375,8 @@ class GoverningEq(object):
 
                     F[jj] = f[axis]
 
-                if np.diff(F)<0:
-                    omega[axis] = np.sqrt(-np.diff(F)/(2*eps[axis]*mass))
+                if np.diff(F) < 0:
+                    omega[axis] = np.sqrt(-np.diff(F) / (2 * eps[axis] * mass))
                 else:
                     omega[axis] = 0
             else:
@@ -413,10 +414,10 @@ class GoverningEq(object):
         beta : list or float
             The damping coefficients along the selected axes.
         """
-        self.beta = np.zeros(3,)
+        self.beta = np.zeros(3, )
 
         if isinstance(eps, float):
-            eps = np.array([eps]*3)
+            eps = np.array([eps] * 3)
 
         if r is None and self.r_eq is None:
             r = np.array([0., 0., 0.])
@@ -425,7 +426,7 @@ class GoverningEq(object):
 
         for axis in axes:
             if not np.isnan(r[axis]):
-                vpmdvi = np.zeros((3,2))
+                vpmdvi = np.zeros((3, 2))
                 vpmdvi[axis, 1] += eps[axis]
                 vpmdvi[axis, 0] -= eps[axis]
 
@@ -436,7 +437,7 @@ class GoverningEq(object):
 
                     F[jj] = f[axis]
 
-                self.beta[axis] = -np.diff(F)/(2*eps[axis])
+                self.beta[axis] = -np.diff(F) / (2 * eps[axis])
             else:
                 self.beta[axis] = 0
 
