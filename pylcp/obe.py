@@ -763,7 +763,7 @@ class OBE(GoverningEq):
         return self.sol
 
     def evolve_motion(self, t_span, freeze_axis=[False, False, False],
-                      random_recoil_allowed=False, max_scatter_probability=0.1,
+                      random_recoil=False, max_scatter_probability=0.1,
                       progress_bar=False, record_force=False,
                       rng=np.random.default_rng(), **kwargs):
         # TODO: clean this mess up, avoid storing as much in OBE etc.
@@ -781,7 +781,7 @@ class OBE(GoverningEq):
         freeze_axis : list of boolean
             Freeze atomic motion along the specified axis.
             Default: [False, False, False]
-        random_recoil_allowed : boolean
+        random_recoil : boolean
             Allow the atom to randomly recoil from scattering events.
             Default: False
         max_scatter_probability : float
@@ -815,7 +815,6 @@ class OBE(GoverningEq):
             scipy's solve_ivp documentation.
         """
         free_axes = np.bitwise_not(freeze_axis)
-        random_recoil_flag = kwargs.pop('random_recoil', random_recoil_allowed)
 
         if progress_bar:
             progress = Progressbar()
@@ -846,7 +845,7 @@ class OBE(GoverningEq):
                 y[-6:-3]
             ))
 
-        def random_recoil(t, y, dt):
+        def random_recoil_function(t, y, dt):
             num_of_scatters = 0
             total_P = 0.
 
@@ -873,13 +872,13 @@ class OBE(GoverningEq):
 
             return num_of_scatters, new_dt_max
 
-        if not random_recoil_flag:
+        if not random_recoil:
             self.sol = solve_ivp(
                 dydt, t_span, np.concatenate((self.rho0, self.v0, self.r0)),
                 **kwargs)
         else:
             self.sol = solve_ivp_random(
-                dydt, random_recoil, t_span,
+                dydt, random_recoil_function, t_span,
                 np.concatenate((self.rho0, self.v0, self.r0)),
                 **kwargs
             )
