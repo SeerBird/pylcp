@@ -4,8 +4,22 @@ import numpy as np
 import pytest
 
 import pylcp as fork
+from tests.test_configs import (
+    TWO_LEVEL_GROUND, TWO_LEVEL_EXCITED, TWO_LEVEL_DQIJ, TWO_LEVEL_MASS,
+    ZERO_B_VECTOR,
+    OBE_RABI_BEAM_CONFIG,
+    OBE_MOTION_BEAM_CONFIG
+)
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+
+
+def create_fork_two_level_hamiltonian():
+    """Helper to create two-level test Hamiltonian from shared configs."""
+    H0_g, muq_g = fork.hamiltonians.singleF(**TWO_LEVEL_GROUND)
+    H0_e, muq_e = fork.hamiltonians.singleF(**TWO_LEVEL_EXCITED)
+    dqij = fork.hamiltonians.dqij_two_bare_hyperfine(**TWO_LEVEL_DQIJ)
+    return fork.Hamiltonian(H0_g, H0_e, muq_g, muq_e, dqij, mass=TWO_LEVEL_MASS)
 
 
 def test_obe_evolve_density_against_reference():
@@ -14,14 +28,10 @@ def test_obe_evolve_density_against_reference():
     assert os.path.exists(ref_path), f"Reference benchmark not found at {ref_path}"
     ref = np.load(ref_path)
 
-    H0_g, muq_g = fork.hamiltonians.singleF(F=0, gF=1.0)
-    H0_e, muq_e = fork.hamiltonians.singleF(F=1, gF=1.0)
-    dqij = fork.hamiltonians.dqij_two_bare_hyperfine(F=0, Fp=1, normalize=True)
-    H = fork.Hamiltonian(H0_g, H0_e, muq_g, muq_e, dqij, mass=87.0)
-
-    beam = fork.LaserBeam(kvec=np.array([0, 0, 1]), pol=np.array([0, 0, 1]), s=2.0, delta=0.0)
+    H = create_fork_two_level_hamiltonian()
+    beam = fork.LaserBeam(**OBE_RABI_BEAM_CONFIG)
     beams = fork.LaserBeams([beam])
-    mag = fork.ConstantMagneticField(np.array([0.0, 0.0, 0.0]))
+    mag = fork.ConstantMagneticField(ZERO_B_VECTOR)
 
     obe = fork.OBE(beams, mag, H, transform_into_re_im=True)
     obe.set_initial_rho_equally()
@@ -41,14 +51,10 @@ def test_obe_evolve_motion_against_reference():
     assert os.path.exists(ref_path), f"Reference benchmark not found at {ref_path}"
     ref = np.load(ref_path)
 
-    H0_g, muq_g = fork.hamiltonians.singleF(F=0, gF=1.0)
-    H0_e, muq_e = fork.hamiltonians.singleF(F=1, gF=1.0)
-    dqij = fork.hamiltonians.dqij_two_bare_hyperfine(F=0, Fp=1, normalize=True)
-    H = fork.Hamiltonian(H0_g, H0_e, muq_g, muq_e, dqij, mass=87.0)
-
-    beam = fork.LaserBeam(kvec=np.array([0, 0, 1]), pol=1, s=1.0, delta=-1.0)
+    H = create_fork_two_level_hamiltonian()
+    beam = fork.LaserBeam(**OBE_MOTION_BEAM_CONFIG)
     beams = fork.LaserBeams([beam])
-    mag = fork.ConstantMagneticField(np.array([0.0, 0.0, 0.0]))
+    mag = fork.ConstantMagneticField(ZERO_B_VECTOR)
 
     obe = fork.OBE(beams, mag, H, transform_into_re_im=True)
     obe.set_initial_position_and_velocity(ref["r0"], ref["v0"])
@@ -67,15 +73,12 @@ def test_obe_evolve_motion_against_reference():
 
 def test_obe_probability_conservation_and_steady_state():
     """Verify trace preservation and saturation steady state for resonant drive."""
-    H0_g, muq_g = fork.hamiltonians.singleF(F=0, gF=1.0)
-    H0_e, muq_e = fork.hamiltonians.singleF(F=1, gF=1.0)
-    dqij = fork.hamiltonians.dqij_two_bare_hyperfine(F=0, Fp=1, normalize=True)
-    H = fork.Hamiltonian(H0_g, H0_e, muq_g, muq_e, dqij, mass=87.0)
+    H = create_fork_two_level_hamiltonian()
 
-    s = 2.0
-    beam = fork.LaserBeam(kvec=np.array([0, 0, 1]), pol=np.array([0, 0, 1]), s=s, delta=0.0)
+    s = OBE_RABI_BEAM_CONFIG["s"]
+    beam = fork.LaserBeam(**OBE_RABI_BEAM_CONFIG)
     beams = fork.LaserBeams([beam])
-    mag = fork.ConstantMagneticField(np.array([0.0, 0.0, 0.0]))
+    mag = fork.ConstantMagneticField(ZERO_B_VECTOR)
 
     obe = fork.OBE(beams, mag, H, transform_into_re_im=True)
     obe.set_initial_rho_equally()

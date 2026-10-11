@@ -4,8 +4,20 @@ import numpy as np
 import pytest
 
 import pylcp as fork
+from tests.test_configs import (
+    TWO_LEVEL_GROUND, TWO_LEVEL_EXCITED, TWO_LEVEL_DQIJ, TWO_LEVEL_MASS,
+    OBE_MOT_BEAMS_CONFIG, QUAD_B_GRADIENT
+)
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+
+
+def create_fork_two_level_hamiltonian():
+    """Helper to create two-level test Hamiltonian from shared configs."""
+    H0_g, muq_g = fork.hamiltonians.singleF(**TWO_LEVEL_GROUND)
+    H0_e, muq_e = fork.hamiltonians.singleF(**TWO_LEVEL_EXCITED)
+    dqij = fork.hamiltonians.dqij_two_bare_hyperfine(**TWO_LEVEL_DQIJ)
+    return fork.Hamiltonian(H0_g, H0_e, muq_g, muq_e, dqij, mass=TWO_LEVEL_MASS)
 
 
 def test_rateeq_evolve_populations_against_reference():
@@ -14,12 +26,9 @@ def test_rateeq_evolve_populations_against_reference():
     assert os.path.exists(ref_path), f"Reference benchmark not found at {ref_path}"
     ref = np.load(ref_path)
 
-    H0_g, muq_g = fork.hamiltonians.singleF(F=0, gF=1.0)
-    H0_e, muq_e = fork.hamiltonians.singleF(F=1, gF=1.0)
-    dqij = fork.hamiltonians.dqij_two_bare_hyperfine(F=0, Fp=1, normalize=True)
-    H = fork.Hamiltonian(H0_g, H0_e, muq_g, muq_e, dqij, mass=87.0)
-    beams = fork.Conventional3DMOTBeams(s=1.0, delta=-1.0)
-    mag = fork.QuadrupoleMagneticField(15.0)
+    H = create_fork_two_level_hamiltonian()
+    beams = fork.Conventional3DMOTBeams(**OBE_MOT_BEAMS_CONFIG)
+    mag = fork.QuadrupoleMagneticField(QUAD_B_GRADIENT)
 
     eq = fork.RateEq(beams, mag, H)
     eq.set_initial_position_and_velocity(ref["r0"], ref["v0"])
@@ -40,12 +49,9 @@ def test_rateeq_evolve_motion_against_reference():
     assert os.path.exists(ref_path), f"Reference benchmark not found at {ref_path}"
     ref = np.load(ref_path)
 
-    H0_g, muq_g = fork.hamiltonians.singleF(F=0, gF=1.0)
-    H0_e, muq_e = fork.hamiltonians.singleF(F=1, gF=1.0)
-    dqij = fork.hamiltonians.dqij_two_bare_hyperfine(F=0, Fp=1, normalize=True)
-    H = fork.Hamiltonian(H0_g, H0_e, muq_g, muq_e, dqij, mass=87.0)
-    beams = fork.Conventional3DMOTBeams(s=1.0, delta=-1.0)
-    mag = fork.QuadrupoleMagneticField(15.0)
+    H = create_fork_two_level_hamiltonian()
+    beams = fork.Conventional3DMOTBeams(**OBE_MOT_BEAMS_CONFIG)
+    mag = fork.QuadrupoleMagneticField(QUAD_B_GRADIENT)
 
     eq = fork.RateEq(beams, mag, H)
     eq.set_initial_position_and_velocity(ref["r0"], ref["v0"])

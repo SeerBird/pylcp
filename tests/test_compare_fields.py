@@ -3,6 +3,11 @@ import numpy as np
 import pytest
 
 import pylcp as fork
+from tests.test_configs import (
+    CONST_B_VECTOR, CONST_B_POS,
+    QUAD_B_GRADIENT, QUAD_B_POSITIONS,
+    MOT_BEAMS_CONFIG
+)
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 
@@ -10,27 +15,19 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 def test_constant_magnetic_field_comparison():
     """Compare constant magnetic field evaluation against precomputed upstream benchmark."""
     ref = np.load(os.path.join(DATA_DIR, "fields_ref.npz"))
-    B0 = np.array([1.2, -0.5, 3.4])
-    mag_fk = fork.ConstantMagneticField(B0)
+    mag_fk = fork.ConstantMagneticField(CONST_B_VECTOR)
 
-    R = np.array([0.5, -1.0, 2.0])
-    np.testing.assert_allclose(mag_fk.Field(R, 0), ref["const_field"])
-    np.testing.assert_allclose(mag_fk.magnitude(R, 0), ref["const_mag"])
-    np.testing.assert_allclose(mag_fk.gradient(R, 0), ref["const_grad"])
+    np.testing.assert_allclose(mag_fk.Field(CONST_B_POS, 0), ref["const_field"])
+    np.testing.assert_allclose(mag_fk.magnitude(CONST_B_POS, 0), ref["const_mag"])
+    np.testing.assert_allclose(mag_fk.gradient(CONST_B_POS, 0), ref["const_grad"])
 
 
 def test_quadrupole_magnetic_field_comparison():
     """Compare quadrupole magnetic field evaluation and gradient against precomputed upstream benchmark."""
     ref = np.load(os.path.join(DATA_DIR, "fields_ref.npz"))
-    grad = 15.0
-    mag_fk = fork.QuadrupoleMagneticField(grad)
+    mag_fk = fork.QuadrupoleMagneticField(QUAD_B_GRADIENT)
 
-    positions = [
-        np.array([0.0, 0.0, 0.0]),
-        np.array([1.0, -2.0, 3.0]),
-        np.array([-0.5, 0.5, -1.0])
-    ]
-    for idx, R in enumerate(positions):
+    for idx, R in enumerate(QUAD_B_POSITIONS):
         np.testing.assert_allclose(mag_fk.Field(R, 0), ref["quad_fields"][idx])
         np.testing.assert_allclose(mag_fk.magnitude_gradient(R, 0), ref["quad_grad_mags"][idx])
 
@@ -38,7 +35,7 @@ def test_quadrupole_magnetic_field_comparison():
 def test_3d_mot_beams_comparison():
     """Compare 3D MOT 6-beam properties against precomputed upstream benchmark."""
     ref = np.load(os.path.join(DATA_DIR, "fields_ref.npz"))
-    beams_fk = fork.Conventional3DMOTBeams(s=2.0, delta=-1.5)
+    beams_fk = fork.Conventional3DMOTBeams(**MOT_BEAMS_CONFIG)
 
     assert len(beams_fk.beam_vector) == len(ref["mot_deltas"])
 

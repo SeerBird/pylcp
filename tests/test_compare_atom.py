@@ -3,6 +3,7 @@ import numpy as np
 import pytest
 
 import pylcp.atom as fork_atom
+from tests.test_configs import ATOM_STATE_CONFIG, ATOM_RB_SPECIES
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 
@@ -10,7 +11,7 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 def test_state_comparison():
     """Compare atom.state object against precomputed upstream benchmark."""
     ref = np.load(os.path.join(DATA_DIR, "atom_ref.npz"))
-    fk_state = fork_atom.State(n=5, S=0.5, L=1, J=1.5, lam=780e-9, tau=26e-9, gJ=1.33)
+    fk_state = fork_atom.State(**ATOM_STATE_CONFIG)
 
     assert fk_state.energy == pytest.approx(float(ref["state_energy"]))
     assert fk_state.gamma == pytest.approx(float(ref["state_gamma"]))
@@ -21,7 +22,7 @@ def test_state_comparison():
 def test_alkali_atom_comparison():
     """Compare atom('87Rb') species constants against precomputed upstream benchmark."""
     ref = np.load(os.path.join(DATA_DIR, "atom_ref.npz"))
-    fk_rb = fork_atom.Atom("87Rb")
+    fk_rb = fork_atom.Atom(ATOM_RB_SPECIES)
 
     assert fk_rb.I == pytest.approx(float(ref["rb_I"]))
     assert fk_rb.gI == pytest.approx(float(ref["rb_gI"]))
