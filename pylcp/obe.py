@@ -766,6 +766,7 @@ class OBE(GoverningEq):
                       random_recoil_allowed=False, max_scatter_probability=0.1,
                       progress_bar=False, record_force=False,
                       rng=np.random.default_rng(), **kwargs):
+        # TODO: clean this mess up, avoid storing as much in OBE etc.
         """
         Evolve :math:`\\rho_{ij}` and the motion of the atom in time.
 
@@ -814,7 +815,7 @@ class OBE(GoverningEq):
             scipy's solve_ivp documentation.
         """
         free_axes = np.bitwise_not(freeze_axis)
-        random_recoil_flag = random_recoil_allowed
+        random_recoil_flag = kwargs.pop('random_recoil', random_recoil_allowed)
 
         if progress_bar:
             progress = Progressbar()
