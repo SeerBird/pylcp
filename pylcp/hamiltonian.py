@@ -391,40 +391,25 @@ class Hamiltonian:
         # Initialize the field-independent component of the Hamiltonian.
         self.H_0 = np.zeros((self.n, self.n), dtype='complex128')
         self.mu_q = np.zeros((3, self.n, self.n), dtype='complex128')
-
-        n = 0
-
-        # First, return H_0 and mu_q:
-        for diag_block in np.diag(self.blocks):
-            if isinstance(diag_block, self.VectorBlock):
-                diag_block.add_to_other_in_place(self.mu_q, n, n,
-                                                 diag_block.parameters['mu_B'])
-            elif isinstance(diag_block, self.H0Block):
-                self.H_0 += diag_block.return_block_in_place(n, n, self.n)
-                n += diag_block.n
-            else:
-                self.H_0 += diag_block[0].return_block_in_place(n, n, self.n)
-                self.mu_q += (diag_block[1].parameters['mu_B'] *
-                              diag_block[1].return_block_in_place(n, n, self.n))
-                n += diag_block[0].n
-
         self.d_q_bare = {}
-
-        # Next, return d_q:
-        for ii in range(self.blocks.shape[0]):
-            for jj in range(ii + 1, self.blocks.shape[1]):
-                if not self.blocks[ii, jj] is None:
-                    key = TransitionKey(self.state_labels[ii], self.state_labels[jj])
-                    nstart = int(np.sum(self.ns[:ii]))
-                    mstart = int(np.sum(self.ns[:jj]))
-                    self.d_q_bare[key] = self.blocks[ii, jj].return_block_in_place(nstart, mstart,
-                                                                                   self.n)
-
         self.d_q_star = {}
-        for key in self.d_q_bare.keys():
-            self.d_q_star[key] = np.zeros(self.d_q_bare[key].shape, dtype='complex128')
-            for kk in range(3):
-                self.d_q_star[key][kk] = np.conjugate(self.d_q_bare[key][kk].T)
+
+        for key, fb in self.blocks_by_keys.items():
+            r_sl, c_sl = fb.row_slice, fb.col_slice
+            if fb.h_0 is not None:
+                self.H_0[r_sl, c_sl] += fb.h_0.matrix
+            if fb.mu_q is not None:
+                self.mu_q[:, r_sl, c_sl] += fb.mu_q.matrix * fb.mu_q.muB
+                if not fb.is_diagonal:
+                    self.mu_q[:, c_sl, r_sl] += np.conjugate(np.swapaxes(fb.mu_q.matrix, -2, -1)) * fb.mu_q.muB
+            if fb.d_q is not None:
+                bare = np.zeros((3, self.n, self.n), dtype='complex128')
+                star = np.zeros((3, self.n, self.n), dtype='complex128')
+                bare[:, r_sl, c_sl] = fb.d_q.matrix
+                for q in range(3):
+                    star[q] = np.conjugate(bare[q].T)
+                self.d_q_bare[key] = bare
+                self.d_q_star[key] = star
 
         # Finally, put together the full d_q, irrespective of laser beam key:
         self.d_q = np.zeros((3, self.n, self.n), dtype='complex128')
@@ -512,42 +497,39 @@ class Hamiltonian:
         # If it does not already exist, make an empty Hamiltonian that has
         # the same dimensions as this one.
         if not hasattr(self, 'rotated_hamiltonian'):
-            self.rotated_hamiltonian = Hamiltonian()
-            for ii, block in enumerate(np.diagonal(self.blocks)):
+            self.rotated_hamiltonian = Hamiltonian(mass=self.mass)
+            for label in self.state_labels:
+                idx = self.state_labels.index(label)
                 self.rotated_hamiltonian.add_H_0_block(
-                    self.state_labels[ii],
-                    np.zeros((self.ns[ii], self.ns[ii]), dtype='complex128')
+                    label,
+                    np.zeros((self.ns[idx], self.ns[idx]), dtype='complex128')
                 )
-            for ii, block_row in enumerate(self.blocks):
-                for jj, block in enumerate(block_row):
-                    if jj > ii:
-                        if not block is None:
-                            self.rotated_hamiltonian.add_d_q_block(
-                                self.state_labels[ii], self.state_labels[jj],
-                                block.matrix,
-                            )
+            for key, fb in self.blocks_by_keys.items():
+                if fb.d_q is not None:
+                    self.rotated_hamiltonian.add_d_q_block(
+                        key.lower, key.upper,
+                        fb.d_q.matrix.copy(),
+                        gamma=fb.d_q.gamma,
+                        k=fb.d_q.k
+                    )
 
         # Have we previously generated a set of transformation matrices?
         if not hasattr(self, 'U'):
-            self.U = np.empty((self.blocks.shape[0],), dtype=object)
-            # Now, go through all of the diagonal elements:
-            for ii, diag_block in enumerate(np.diag(self.blocks)):
-                # Make a transformation matrix that is boring.  We'll overwrite
-                # it later if it gets interesting.
-                self.U[ii] = np.eye(self.ns[ii])
+            self.U = [np.eye(self.ns[ii]) for ii in range(len(self.state_labels))]
 
         # Now, are any of the diagonal submatrices not diagonal?
         if not np.all(self.diagonal) or B < 0:
             # If so, go through all of the diagonal elements:
-            for ii, diag_block in enumerate(np.diag(self.blocks)):
+            for ii, label in enumerate(self.state_labels):
+                fb = self.blocks_by_keys[TransitionKey(label, label)]
+                rot_fb = self.rotated_hamiltonian.blocks_by_keys[TransitionKey(label, label)]
                 # It isn't? Diagonalize it:
                 if not self.diagonal[ii] or B < 0:
-                    if isinstance(diag_block, tuple):
-                        H = (diag_block[0].matrix - B * diag_block[1].matrix[1])
-                    elif isinstance(diag_block, self.VectorBlock):
-                        H = -B * diag_block.matrix[1]
-                    else:
-                        H = diag_block.matrix
+                    H = np.zeros((self.ns[ii], self.ns[ii]), dtype='complex128')
+                    if fb.h_0 is not None:
+                        H += fb.h_0.matrix
+                    if fb.mu_q is not None:
+                        H -= B * fb.mu_q.matrix[1] * fb.mu_q.muB
 
                     # Diagonalize at this field:
                     Es, self.U[ii] = np.linalg.eig(H)
@@ -561,48 +543,39 @@ class Hamiltonian:
                     # components, then build the matrix with the eigenvalues and
                     # go
                     if np.allclose(np.imag(Es), 0.):
-                        self.rotated_hamiltonian.blocks[ii, ii].matrix = np.diag(np.real(Es))
+                        rot_fb.h_0.matrix = np.diag(np.real(Es))
                     else:
                         raise ValueError('You broke the Hamiltonian!')
                 else:  # It is diagonal:
-                    if isinstance(diag_block, tuple):
-                        self.rotated_hamiltonian.blocks[ii, ii].matrix = \
-                            diag_block[0].matrix - B * diag_block[1].matrix[1]
-                    elif isinstance(diag_block, self.VectorBlock):
-                        self.rotated_hamiltonian.blocks[ii, ii].matrix = \
-                            -B * diag_block.matrix[1]
-                    else:
-                        self.rotated_hamiltonian.blocks[ii, ii].matrix = \
-                            diag_block.matrix
+                    H = np.zeros((self.ns[ii], self.ns[ii]), dtype='complex128')
+                    if fb.h_0 is not None:
+                        H += fb.h_0.matrix
+                    if fb.mu_q is not None:
+                        H -= B * fb.mu_q.matrix[1] * fb.mu_q.muB
+                    rot_fb.h_0.matrix = H
 
             # Now, rotate the d_q:
-            for ii in range(self.blocks.shape[0]):
-                for jj in range(ii + 1, self.blocks.shape[1]):
-                    if (not self.blocks[ii, jj] is None) and (
-                            not self.diagonal[ii] or not self.diagonal[jj] or B < 0):
-                        for kk in range(3):
-                            self.rotated_hamiltonian.blocks[ii, jj].matrix[kk] = \
-                                self.U[ii].T @ self.blocks[ii, jj].matrix[kk] @ self.U[jj]
-
-                            self.rotated_hamiltonian.blocks[jj, ii].matrix[kk] = \
-                                np.conjugate(self.rotated_hamiltonian.blocks[ii, jj].matrix[kk].T)
-
-                            if (self.rotated_hamiltonian.blocks[ii, jj].matrix.shape !=
-                                    self.blocks[ii, jj].matrix.shape):
-                                raise ValueError("Rotataed d_q not the same size as original.")
+            for key, fb in self.blocks_by_keys.items():
+                if not fb.d_q is not None:
+                    continue
+                ii = self.state_labels.index(key.lower)
+                jj = self.state_labels.index(key.upper)
+                if not self.diagonal[ii] or not self.diagonal[jj] or B < 0:
+                    rot_fb = self.rotated_hamiltonian.blocks_by_keys[key]
+                    for kk in range(3):
+                        rot_fb.d_q.matrix[kk] = self.U[ii].T @ fb.d_q.matrix[kk] @ self.U[jj]
         else:
             # We are already diagonal, so all we have to do is change the
             # eigenvalues.
-            for ii, diag_block in enumerate(np.diag(self.blocks)):
-                if isinstance(diag_block, tuple):
-                    self.rotated_hamiltonian.blocks[ii, ii].matrix = \
-                        np.real(diag_block[0].matrix - B * diag_block[1].matrix[1])
-                elif isinstance(diag_block, self.VectorBlock):
-                    self.rotated_hamiltonian.blocks[ii, ii].matrix = \
-                        np.real(-B * diag_block.matrix[1])
-                else:
-                    self.rotated_hamiltonian.blocks[ii, ii].matrix = \
-                        np.real(diag_block.matrix)
+            for ii, label in enumerate(self.state_labels):
+                fb = self.blocks_by_keys[TransitionKey(label, label)]
+                rot_fb = self.rotated_hamiltonian.blocks_by_keys[TransitionKey(label, label)]
+                H = np.zeros((self.ns[ii], self.ns[ii]), dtype='float64')
+                if fb.h_0 is not None:
+                    H += np.real(fb.h_0.matrix)
+                if fb.mu_q is not None:
+                    H -= np.real(B * fb.mu_q.matrix[1] * fb.mu_q.muB)
+                rot_fb.h_0.matrix = H
 
         return self.rotated_hamiltonian
 

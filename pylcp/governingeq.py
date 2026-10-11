@@ -71,7 +71,7 @@ class GoverningEq(object):
 
     Parameters
     ----------
-    laserBeams : dictionary of pylcp.LaserBeams, pylcp.LaserBeams, or list of pylcp.LaserBeam
+    laserBeams : dictionary of pylcp.LaserBeams, pylcp.LaserBeams
         The laserBeams that will be used in constructing the optical Bloch
         equations.  which transitions in the block diagonal hamiltonian.  It can
         be any of the following:
@@ -82,8 +82,6 @@ class GoverningEq(object):
               `n->m`.
             * pylcp.LaserBeams: a single set of laser beams is assumed to
               address the transition `g->e`.
-            * a list of pylcp.LaserBeam: automatically promoted to a
-              pylcp.LaserBeams object assumed to address the transtion `g->e`.
 
     magField : pylcp.MagField
         The object that defines the magnetic field.
@@ -98,7 +96,7 @@ class GoverningEq(object):
         Initial velocity.  Default: [0.,0.,0.]
     """
 
-    def __init__(self, laserBeams, magField: MagField, hamiltonian: Hamiltonian | None = None,
+    def __init__(self, laserBeams:dict[TransitionKey,LaserBeams]|LaserBeams, magField: MagField, hamiltonian: Hamiltonian | None = None,
                  a=np.array([0., 0., 0.]), r0=np.array([0., 0., 0.]),
                  v0=np.array([0., 0., 0.])):
         self.set_initial_position_and_velocity(r0, v0)
@@ -106,10 +104,7 @@ class GoverningEq(object):
         # Add lasers:
         default_tk = TransitionKey('g', 'e')
         self.laserBeams: dict[TransitionKey, LaserBeams] = {}
-        if isinstance(laserBeams, list):
-            # TODO: check the list contains LaserBeam objects
-            self.laserBeams[default_tk] = copy.copy(LaserBeams(laserBeams))
-        elif isinstance(laserBeams, LaserBeams):
+        if isinstance(laserBeams, LaserBeams):
             self.laserBeams[default_tk] = copy.copy(laserBeams)
         elif isinstance(laserBeams, dict):
             key: TransitionKey

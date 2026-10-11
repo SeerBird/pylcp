@@ -106,7 +106,7 @@ class OBE(GoverningEq):
 
     Parameters
     ----------
-    laserBeams : dictionary of pylcp.LaserBeams, pylcp.LaserBeams, or list of pylcp.LaserBeam
+    laserBeams : dictionary of pylcp.LaserBeams, pylcp.LaserBeams
         The laserBeams that will be used in constructing the optical Bloch
         equations.  which transitions in the block diagonal hamiltonian.  It can
         be any of the following:
@@ -117,8 +117,6 @@ class OBE(GoverningEq):
               `n->m`.
             * pylcp.LaserBeams: a single set of laser beams is assumed to
               address the transition `g->e`.
-            * a list of pylcp.LaserBeam: automatically promoted to a
-              pylcp.LaserBeams object assumed to address the transtion `g->e`.
 
     magField : pylcp.MagField or callable
         The function or object that defines the magnetic field.
@@ -149,16 +147,13 @@ class OBE(GoverningEq):
     Methods
     -------
     """
-    hamiltonian: Hamiltonian
-
-    def __init__(self, laserBeams, magField: MagField, hamiltonian: Hamiltonian,
+    hamiltonian:Hamiltonian
+    def __init__(self, laserBeams: dict[TransitionKey, LaserBeams] | LaserBeams, magField: MagField,
+                 hamiltonian: Hamiltonian,
                  a=np.array([0., 0., 0.]), transform_into_re_im=True,
                  use_sparse_matrices=None, include_mag_forces=True,
                  r0=np.array([0., 0., 0.]), v0=np.array([0., 0., 0.])):
-        super().__init__(laserBeams, magField, hamiltonian, a=a,
-                         r0=r0, v0=v0)
-        if self.hamiltonian is None:
-            raise ValueError("OBE needs to be defined with a hamiltonian")
+        super().__init__(laserBeams, magField, hamiltonian, a=a, r0=r0, v0=v0)
         # Save the optional arguments:
         self.transform_into_re_im = transform_into_re_im
         self.include_mag_forces = include_mag_forces
@@ -183,10 +178,24 @@ class OBE(GoverningEq):
         # emission, applied magnetic field, and the zero-field Hamiltonian.  We
         # compute the latter-two directly from the commutator.
 
-        # Build the matricies that control evolution:
+        # Build the matrices that control evolution:
         self.ev_mat = OBEEvolutionMatrices()
-        self.__build_decay_ev()
-        self.__build_coherent_ev()
+        self.__build_ev_matrices()
+
+    # region build evolution matrices
+    def __build_ev_matrices(self):
+        """Build all evolution matrices and pre-sum the static components."""
+        (self.ev_mat.decay, self.decay_rates,
+         # the rest is questionable
+         self.decay_rates_truncated,
+         self.decay_rho_indices,
+         self.recoil_velocity) = self._build_decay_ev()
+        self.ev_mat.h0 = self.__build_coherent_ev_for_h0()
+        self.ev_mat.magnetic = self.__build_coherent_ev_for_mu()
+        d_q_ev, d_q_star_ev = self.__build_coherent_ev_for_dq()
+        self.ev_mat.d_q = d_q_ev
+        self.ev_mat.d_q_conj = d_q_star_ev
+        self.ev_mat.static = self.ev_mat.decay + self.ev_mat.h0
 
         # If necessary, transform the evolution matrices:
         if self.transform_into_re_im:
@@ -195,12 +204,11 @@ class OBE(GoverningEq):
         if self.use_sparse_matrices:
             self.__convert_to_sparse()
 
-    # region build evolution matrices
     def __build_coherent_ev_for_h0(self) -> np.ndarray:
         n2 = self.hamiltonian.n ** 2
         h0_ev = np.zeros((n2, n2), dtype='complex128')
-        for row, A in enumerate(self.hamiltonian.state_labels):
-            diag_block = self.hamiltonian.blocks[row][0]
+        for A in self.hamiltonian.state_labels:
+            diag_block = self.hamiltonian.blocks_by_keys[TransitionKey(A, A)]
             if diag_block.h_0 is None:
                 continue
             H_AA = diag_block.h_0.matrix
@@ -293,86 +301,69 @@ class OBE(GoverningEq):
 
         return d_q_ev, d_q_star_ev
 
-    # endregion
-
-    def __build_coherent_ev(self):
-        self.ev_mat.h0 = self.__build_coherent_ev_for_h0()
-        self.ev_mat.magnetic = self.__build_coherent_ev_for_mu()
-        d_q_ev, d_q_star_ev = self.__build_coherent_ev_for_dq()
-        self.ev_mat.d_q = d_q_ev
-        self.ev_mat.d_q_conj = d_q_star_ev
-
-    def __build_decay_ev(self):
+    def _build_decay_ev(self):
         """
         This method constructs the decay portion of the OBE using the radiation
-        reaction approximation.
+        reaction approximation via block-direct Kronecker assembly.
         """
-        d_q_bare = self.hamiltonian.d_q_bare
-        d_q_star = self.hamiltonian.d_q_star
+        decay_rates = {}
+        decay_rates_truncated = {}
+        decay_rho_indices = {}
+        recoil_velocity = {}
 
-        self.decay_rates = {}
-        self.decay_rates_truncated = {}
-        self.decay_rho_indices = {}
-        self.recoil_velocity = {}
+        n2 = self.hamiltonian.n ** 2
+        decay_total = np.zeros((n2, n2), dtype='complex128')
 
-        self.ev_mat.decay = np.zeros((self.hamiltonian.n ** 2,
-                                      self.hamiltonian.n ** 2),
-                                     dtype='complex128')
-
-        # Go through each dipole moment and calculate:
-        for key in d_q_bare:
-            ev_mat = np.zeros((self.hamiltonian.n ** 2, self.hamiltonian.n ** 2),
-                              dtype='complex128')
-            fb = self.hamiltonian.blocks_by_keys[key]
+        for key, fb in self.hamiltonian.blocks_by_keys.items():
+            if not fb.d_q is not None:
+                continue
             gamma = fb.d_q.gamma
+            g_label, e_label = key
+            D_q = fb.d_q.matrix  # shape (3, N_g, N_e)
 
-            # The first index we want to capture:
-            for ii in range(self.hamiltonian.n):
-                # The second index we want to capture:
-                for jj in range(self.hamiltonian.n):
-                    # The first sum index:
-                    for kk in range(self.hamiltonian.n):
-                        # The second sum index:
-                        for ll in range(self.hamiltonian.n):
-                            for mm, q in enumerate(np.arange(-1., 2., 1)):
-                                # first term in the commutator, first part:
-                                ev_mat[self.__density_index(ii, jj),
-                                self.__density_index(ll, jj)] -= \
-                                    d_q_star[key][mm, ll, kk] * d_q_bare[key][mm, kk, ii]
-                                # first term in the commutator, second part:
-                                ev_mat[self.__density_index(ii, jj),
-                                self.__density_index(kk, ll)] += \
-                                    d_q_star[key][mm, kk, ii] * d_q_bare[key][mm, jj, ll]
+            ev_mat = np.zeros((n2, n2), dtype='complex128')
 
-                                # second term in the commutator, first part:
-                                ev_mat[self.__density_index(ii, jj),
-                                self.__density_index(ll, kk)] += \
-                                    d_q_star[key][mm, ll, ii] * d_q_bare[key][mm, jj, kk]
-                                # second term in the commutator, second part:
-                                ev_mat[self.__density_index(ii, jj),
-                                self.__density_index(ii, ll)] -= \
-                                    d_q_star[key][mm, jj, kk] * d_q_bare[key][mm, kk, ll]
+            # region Loss on excited state, in the vector basis: M_ee = sum over q of I*||d_q||^2
+            M_ee = np.zeros((fb.m, fb.m), dtype='complex128')
+            for q in range(3):
+                M_ee += np.conjugate(D_q[q].T) @ D_q[q]
+            # endregion
+            # region Loss of coherences/population involving excited state e
+            for C in self.hamiltonian.state_labels:
+                c_slice = self.hamiltonian.get_state_slice(C)
+                N_C = c_slice.stop - c_slice.start
+                In_C = np.eye(N_C, dtype='complex128')
 
-            # Normalize:
-            ev_mat = 0.5 * gamma * ev_mat
+                # Fast-index (row) loss on rho_eC: -0.5 * gamma * (In_C (x) M_ee.T)
+                idx_eC = self.__get_vec_indices_for_labels(e_label, C)
+                ev_mat[np.ix_(idx_eC, idx_eC)] -= 0.5 * gamma * np.kron(In_C, M_ee.T)
 
-            # Save the decay rates for the evolve_motion function:
-            self.decay_rates[key] = -np.real(np.array(
+                # Slow-index (col) loss on rho_Ce: -0.5 * gamma * (M_ee (x) In_C)
+                idx_Ce = self.__get_vec_indices_for_labels(C, e_label)
+                ev_mat[np.ix_(idx_Ce, idx_Ce)] -= 0.5 * gamma * np.kron(M_ee, In_C)
+            # endregion
+            # region Decay from rho_ee to rho_gg: sum over q of gamma * (D_q (x) D_q^*)
+            idx_gg = self.__get_vec_indices_for_labels(g_label, g_label)
+            idx_ee = self.__get_vec_indices_for_labels(e_label, e_label)
+            for q in range(3):
+                ev_mat[np.ix_(idx_gg, idx_ee)] += gamma * np.kron(D_q[q], np.conjugate(D_q[q]))
+            # endregion
+            # Get the decay rates (for the evolve_motion function):
+            decay_rates[key] = -np.real(np.array(
                 [ev_mat[self.__density_index(ii, ii), self.__density_index(ii, ii)]
                  for ii in range(self.hamiltonian.n)]
             ))
+            decay_rates_truncated[key] = decay_rates[key][decay_rates[key] > 0]
+            decay_rho_indices[key] = np.array([self.__density_index(ii, ii)
+                                               for ii, rate in enumerate(decay_rates[key])
+                                               if rate > 0])
+            recoil_velocity[key] = fb.d_q.k / self.hamiltonian.mass
 
-            # These are useful for the random evolution part:
-            self.decay_rates_truncated[key] = self.decay_rates[key][self.decay_rates[key] > 0]
-            self.decay_rho_indices[key] = np.array([self.__density_index(ii, ii)
-                                                    for ii, rate in enumerate(self.decay_rates[key])
-                                                    if rate > 0]
-                                                   )
-            self.recoil_velocity[key] = fb.d_q.k / self.hamiltonian.mass
+            decay_total += ev_mat
+        return (decay_total, decay_rates,
+                decay_rates_truncated, decay_rho_indices, recoil_velocity)
 
-            self.ev_mat['decay'] += ev_mat
-
-        return self.ev_mat['decay']
+    # endregion
 
     def __build_transform_matrices(self):
         self.U = np.zeros((self.hamiltonian.n ** 2, self.hamiltonian.n ** 2),
@@ -423,8 +414,9 @@ class OBE(GoverningEq):
             raise ValueError('Something went dreadfully wrong.')
 
     def __transform_ev_matrices(self):
-        self.ev_mat['decay'] = self.__transform_ev_matrix(self.ev_mat['decay'])
-        self.ev_mat['H0'] = self.__transform_ev_matrix(self.ev_mat['H0'])
+        self.ev_mat.decay = self.__transform_ev_matrix(self.ev_mat.decay)
+        self.ev_mat.h0 = self.__transform_ev_matrix(self.ev_mat.h0)
+        self.ev_mat.static = self.__transform_ev_matrix(self.ev_mat.static)
 
         self.ev_mat['reE'] = {}
         self.ev_mat['imE'] = {}
@@ -640,7 +632,7 @@ class OBE(GoverningEq):
         ev_mat : array_like
             Evolution matrix for the densities
         """
-        ev_mat = self.ev_mat['decay'] + self.ev_mat['H0']
+        ev_mat = self.ev_mat.static.copy()
 
         # Add in electric fields:
         for key in self.laserBeams.keys():
@@ -677,7 +669,7 @@ class OBE(GoverningEq):
         and then do the dot.  It is also most efficient to avoid doing useless
         math if the applied field is zero.
         """
-        drhodt = (self.ev_mat['decay'] @ rho) + (self.ev_mat['H0'] @ rho)
+        drhodt = self.ev_mat.static @ rho
 
         # Add in electric fields:
         for key in self.laserBeams.keys():
@@ -771,7 +763,7 @@ class OBE(GoverningEq):
         return self.sol
 
     def evolve_motion(self, t_span, freeze_axis=[False, False, False],
-                      random_recoil=False, max_scatter_probability=0.1,
+                      random_recoil_allowed=False, max_scatter_probability=0.1,
                       progress_bar=False, record_force=False,
                       rng=np.random.default_rng(), **kwargs):
         """
@@ -788,7 +780,7 @@ class OBE(GoverningEq):
         freeze_axis : list of boolean
             Freeze atomic motion along the specified axis.
             Default: [False, False, False]
-        random_recoil : boolean
+        random_recoil_allowed : boolean
             Allow the atom to randomly recoil from scattering events.
             Default: False
         max_scatter_probability : float
@@ -822,10 +814,12 @@ class OBE(GoverningEq):
             scipy's solve_ivp documentation.
         """
         free_axes = np.bitwise_not(freeze_axis)
-        random_recoil_flag = random_recoil
+        random_recoil_flag = random_recoil_allowed
 
         if progress_bar:
             progress = Progressbar()
+        else:
+            progress = None
 
         if record_force:
             ts = []
@@ -876,7 +870,7 @@ class OBE(GoverningEq):
             # exceeding dt max:
             new_dt_max = (max_scatter_probability / total_P) * dt
 
-            return (num_of_scatters, new_dt_max)
+            return num_of_scatters, new_dt_max
 
         if not random_recoil_flag:
             self.sol = solve_ivp(
@@ -889,7 +883,7 @@ class OBE(GoverningEq):
                 **kwargs
             )
 
-        if progress_bar:
+        if progress is not None:
             # Just in case the solve_ivp_random terminated due to an event.
             progress.update(1.)
 
@@ -1000,8 +994,7 @@ class OBE(GoverningEq):
             # First, determine the average mu_q:
             # This returns a (3,) + rho.shape[2:] array
             mu_q_av = self.observable(self.hamiltonian.d_q_bare[key], rho)
-            gamma = self.hamiltonian.blocks[self.hamiltonian.blocks_by_keys[key]].parameters[
-                'gamma']
+            gamma = self.hamiltonian.blocks_by_keys[key].d_q.gamma
 
             if not return_details:
                 delE = self.laserBeams[key].total_electric_field_gradient(np.real(r), t)

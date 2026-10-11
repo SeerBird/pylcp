@@ -164,6 +164,14 @@ class TransitionKey(NamedTuple):
     ground: str
     excited: str
 
+    @property
+    def lower(self) -> str:
+        return self.ground
+
+    @property
+    def upper(self) -> str:
+        return self.excited
+
     def __str__(self) -> str:
         return f"{self.ground}->{self.excited}"
 
@@ -188,6 +196,7 @@ class OBEEvolutionMatrices:
     """
     decay: np.ndarray = field(default_factory=lambda: np.array([]))
     h0: np.ndarray = field(default_factory=lambda: np.array([]))
+    static: np.ndarray = field(default_factory=lambda: np.array([]))
     re_electric: dict[TransitionKey, Any] = field(default_factory=dict)
     im_electric: dict[TransitionKey, Any] = field(default_factory=dict)
     d_q: dict[TransitionKey, Any] = field(default_factory=dict)
@@ -199,6 +208,7 @@ class OBEEvolutionMatrices:
             "decay": self.decay,
             "H0": self.h0,
             "h0": self.h0,
+            "static": self.static,
             "B": self.magnetic,
             "magnetic": self.magnetic,
             "reE": self.re_electric,
@@ -218,6 +228,8 @@ class OBEEvolutionMatrices:
             self.decay = value
         elif key in ("H0", "h0"):
             self.h0 = value
+        elif key == "static":
+            self.static = value
         elif key in ("B", "magnetic"):
             self.magnetic = value
         elif key in ("reE", "re_electric"):
@@ -240,12 +252,12 @@ class OBEEvolutionMatrices:
             raise KeyError(f"Cannot delete key '{key}' from OBEEvolutionMatrices")
 
     def __contains__(self, key: str) -> bool:
-        valid_keys = {"decay", "H0", "h0", "B", "magnetic", "reE", "re_electric", "imE",
+        valid_keys = {"decay", "H0", "h0", "static", "B", "magnetic", "reE", "re_electric", "imE",
                       "im_electric", "d_q", "d_q*", "d_q_conj"}
         return key in valid_keys
 
     def keys(self) -> list[str]:
-        keys_list = ["decay", "H0", "B"]
+        keys_list = ["decay", "H0", "static", "B"]
         if self.re_electric:
             keys_list.append("reE")
         if self.im_electric:

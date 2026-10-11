@@ -22,7 +22,6 @@ def create_obe_systems():
     beams_fk = fork.Conventional3DMOTBeams(s=1.0, delta=-1.0)
     mag_fk = fork.ConstantMagneticField(np.array([0.0, 0.0, 0.0]))
     eq_fk = fork.OBE(beams_fk, mag_fk, H_fk, transform_into_re_im=False)
-
     return eq_up, eq_fk
 
 def test_obe_evolution_matrix_comparison():

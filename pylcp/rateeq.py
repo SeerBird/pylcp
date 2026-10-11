@@ -13,7 +13,7 @@ from .hamiltonian import Hamiltonian
 from .common import (Progressbar, random_vector, BaseForceProfile)
 from .governingeq import GoverningEq
 from .integration_tools import solve_ivp_random
-from .typing import RateEqEvolutionMatrices
+from .typing import RateEqEvolutionMatrices, TransitionKey
 
 
 @numba.vectorize([numba.float64(numba.complex128), numba.float32(numba.complex64)])
@@ -165,51 +165,42 @@ class RateEq(GoverningEq):
         # rotated_ham.make_full_matrices(), but I would imagine it would
         # be significantly slower.
 
-        # Let's use the laser_keys dictionary to go through the non-zero d_q:
-        for key in self.hamiltonian.blocks_by_keys:
-            # The index of the current d_q matrix:
-            ind = rotated_ham.blocks_by_keys[key]
-
-            # Grab the block of interest:
-            d_q_block = rotated_ham.blocks[ind]
+        # Let's use the blocks_by_keys dictionary to go through the non-zero d_q:
+        for key, fb in rotated_ham.blocks_by_keys.items():
+            if not fb.d_q is not None:
+                continue
 
             # The offset index for the lower states:
-            noff = int(np.sum(rotated_ham.ns[:ind[0]]))
+            noff = fb.noffset
             # The offset index for the higher states:
-            moff = int(np.sum(rotated_ham.ns[:ind[1]]))
+            moff = fb.moffset
 
             # The number of lower states:
-            n = rotated_ham.ns[ind[0]]
+            n = fb.n
             # The number of higher states:
-            m = rotated_ham.ns[ind[1]]
+            m = fb.m
 
             # Calculate the decay of the states attached to this block:
-            gamma = d_q_block.parameters['gamma']
-            k = d_q_block.parameters['k']
+            gamma = fb.d_q.gamma
+            k = fb.d_q.k
 
-            # Let's see if we can avoid a for loop here:
-#             for jj in range(rotated_ham.ns[ll]):
-#                 self.Rev_decay[n+jj, n+jj] -= gamma*\
-#                             np.sum(np.sum(abs2(
-#                                 other_block.matrix[:, :, jj]
-#                             )))
             # Save the decay rates out of the excited state:
-            self.decay_rates[key] = gamma*np.sum(abs2(
-                d_q_block.matrix[:, :, :]
-            ), axis=(0,1))
+            self.decay_rates[key] = gamma * np.sum(abs2(
+                fb.d_q.matrix[:, :, :]
+            ), axis=(0, 1))
 
             # Save the indices for the excited states of this d_q block
             # for the random_recoil function:
-            self.decay_N_indices[key] = np.arange(moff, moff+m)
+            self.decay_N_indices[key] = np.arange(moff, moff + m)
 
             # Add (more accurately, subtract) these decays to the evolution matrix:
-            self.Rev_decay[(np.arange(moff, moff+m), np.arange(moff, moff+m))] -= \
-            self.decay_rates[key]
+            self.Rev_decay[(np.arange(moff, moff + m), np.arange(moff, moff + m))] -= \
+                self.decay_rates[key]
 
             # Now calculate the decays into the lower state connected by this
             # d_q:
-            self.Rev_decay[noff:noff+n, moff:moff+m] += \
-                        gamma*np.sum(abs2(d_q_block.matrix), axis=0)
+            self.Rev_decay[noff:noff + n, moff:moff + m] += \
+                gamma * np.sum(abs2(fb.d_q.matrix), axis=0)
 
         self.ev_mat.decay = self.Rev_decay
         return self.Rev_decay
@@ -221,13 +212,15 @@ class RateEq(GoverningEq):
         """
         for key in self.laserBeams:
             # Extract the relevant d_q matrix:
-            ind = self.hamiltonian.rotated_hamiltonian.blocks_by_keys[key]
-            d_q = self.hamiltonian.rotated_hamiltonian.blocks[ind].matrix
-            gamma = self.hamiltonian.blocks[ind].parameters['gamma']
+            rot_fb = self.hamiltonian.rotated_hamiltonian.blocks_by_keys[key]
+            d_q = rot_fb.d_q.matrix
+            gamma = rot_fb.d_q.gamma
 
             # Extract the energies:
-            E1 = np.diag(self.hamiltonian.rotated_hamiltonian.blocks[ind[0],ind[0]].matrix)
-            E2 = np.diag(self.hamiltonian.rotated_hamiltonian.blocks[ind[1],ind[1]].matrix)
+            g_fb = self.hamiltonian.rotated_hamiltonian.blocks_by_keys[TransitionKey(key.lower, key.lower)]
+            e_fb = self.hamiltonian.rotated_hamiltonian.blocks_by_keys[TransitionKey(key.upper, key.upper)]
+            E1 = np.diag(g_fb.h_0.matrix)
+            E2 = np.diag(e_fb.h_0.matrix)
 
             E2, E1 = np.meshgrid(E2, E1)
 
@@ -255,12 +248,12 @@ class RateEq(GoverningEq):
     def _add_pumping_rates_to_Rev(self):
         # Now add the pumping rates into the rate equation propogation matrix:
         for key in self.laserBeams:
-            ind = self.hamiltonian.rotated_hamiltonian.blocks_by_keys[key]
+            fb = self.hamiltonian.rotated_hamiltonian.blocks_by_keys[key]
 
-            n_off = sum(self.hamiltonian.rotated_hamiltonian.ns[:ind[0]])
-            n = self.hamiltonian.rotated_hamiltonian.ns[ind[0]]
-            m_off = sum(self.hamiltonian.rotated_hamiltonian.ns[:ind[1]])
-            m = self.hamiltonian.rotated_hamiltonian.ns[ind[1]]
+            n_off = fb.noffset
+            n = fb.n
+            m_off = fb.moffset
+            m = fb.m
 
             # Sum over all lasers:
             Rij = np.sum(self.Rijl[key], axis=0)
@@ -413,11 +406,11 @@ class RateEq(GoverningEq):
         for key in self.laserBeams:
             f[key] = np.zeros((3, len(self.laserBeams[key].beam_vector)))
 
-            ind = self.hamiltonian.blocks_by_keys[key]
-            n_off = sum(self.hamiltonian.ns[:ind[0]])
-            n = self.hamiltonian.ns[ind[0]]
-            m_off = sum(self.hamiltonian.ns[:ind[1]])
-            m = self.hamiltonian.ns[ind[1]]
+            fb = self.hamiltonian.blocks_by_keys[key]
+            n_off = fb.noffset
+            n = fb.n
+            m_off = fb.moffset
+            m = fb.m
 
             Ne, Ng = np.meshgrid(N[m_off:(m_off+m)], N[n_off:(n_off+n)], )
 
@@ -431,27 +424,21 @@ class RateEq(GoverningEq):
         if self.include_mag_forces:
             gradBmag = self.magField.magnitude_gradient(r)
 
-            for ii, block in enumerate(np.diag(self.hamiltonian.blocks)):
+            for ii, label in enumerate(self.hamiltonian.state_labels):
+                fb = self.hamiltonian.blocks_by_keys[TransitionKey(label, label)]
+                if not fb.mu_q is not None:
+                    continue
                 ind1 = int(np.sum(self.hamiltonian.ns[:ii]))
                 ind2 = int(np.sum(self.hamiltonian.ns[:ii+1]))
+                mu_mat = fb.mu_q.matrix[1] * fb.mu_q.muB
                 if self.hamiltonian.diagonal[ii]:
-                    if isinstance(block, tuple):
-                        fmag += np.sum(np.real(
-                            block[1].matrix[1] @ N[ind1:ind2]
-                            ))*gradBmag
-                    elif isinstance(block, self.hamiltonian.VectorBlock):
-                        fmag += np.sum(np.real(
-                            block.matrix[1] @ N[ind1:ind2]
-                            ))*gradBmag
+                    fmag += np.sum(np.real(
+                        mu_mat @ N[ind1:ind2]
+                    )) * gradBmag
                 else:
-                    if isinstance(block, tuple):
-                        fmag += np.sum(np.real(
-                            self.hamiltonian.U[ii].T @ block[1].matrix[1] @
-                            self.hamiltonian.U[ii]) @ N[ind1:ind2])*gradBmag
-                    elif isinstance(block, self.hamiltonian.VectorBlock):
-                        fmag += np.sum(np.real(
-                            self.hamiltonian.U[ii].T @ block.matrix[1] @
-                            self.hamiltonian.U[ii]) @ N[ind1:ind2])*gradBmag
+                    fmag += np.sum(np.real(
+                        self.hamiltonian.U[ii].T @ mu_mat @
+                        self.hamiltonian.U[ii]) @ N[ind1:ind2]) * gradBmag
 
             F += fmag
 

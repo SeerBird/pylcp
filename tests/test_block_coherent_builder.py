@@ -96,3 +96,62 @@ def test_block_coherent_builder_dq():
         M_star_full = gamma * ham.d_q_star[key][q] / 4.0
         baseline_dq_star = 1j * (np.kron(M_star_full.T, In) - np.kron(In, M_star_full))
         assert np.allclose(obe.ev_mat.d_q_conj[key][q], baseline_dq_star, atol=1e-12)
+
+
+def reference_decay_builder(ham):
+    ham.make_full_matrices()
+    n2 = ham.n ** 2
+    ev_mat = np.zeros((n2, n2), dtype='complex128')
+    for key in ham.d_q_bare:
+        gamma = ham.blocks_by_keys[key].d_q.gamma
+        d_q_bare = ham.d_q_bare[key]
+        d_q_star = ham.d_q_star[key]
+        for ii in range(ham.n):
+            for jj in range(ham.n):
+                for kk in range(ham.n):
+                    for ll in range(ham.n):
+                        for mm in range(3):
+                            ev_mat[ii + jj * ham.n, ll + jj * ham.n] -= \
+                                0.5 * gamma * d_q_star[mm, ll, kk] * d_q_bare[mm, kk, ii]
+                            ev_mat[ii + jj * ham.n, kk + ll * ham.n] += \
+                                0.5 * gamma * d_q_star[mm, kk, ii] * d_q_bare[mm, jj, ll]
+                            ev_mat[ii + jj * ham.n, ll + kk * ham.n] += \
+                                0.5 * gamma * d_q_star[mm, ll, ii] * d_q_bare[mm, jj, kk]
+                            ev_mat[ii + jj * ham.n, ii + ll * ham.n] -= \
+                                0.5 * gamma * d_q_star[mm, jj, kk] * d_q_bare[mm, kk, ll]
+    return ev_mat
+
+
+def test_block_decay_builder():
+    ham, laser_beams, mag_field = create_two_level_system()
+    obe = OBE(laser_beams, mag_field, ham, transform_into_re_im=False)
+
+    ref_decay = reference_decay_builder(ham)
+    assert np.allclose(obe.ev_mat.decay, ref_decay, atol=1e-12)
+
+    # Verify static sum attribute
+    assert np.allclose(obe.ev_mat.static, obe.ev_mat.decay + obe.ev_mat.h0, atol=1e-12)
+
+    # Verify recoil velocity and decay rates
+    key = TransitionKey('g', 'e')
+    assert key in obe.decay_rates
+    assert key in obe.recoil_velocity
+    assert np.isclose(obe.recoil_velocity[key], 1.0 / ham.mass)
+
+
+def test_obe_transformed_static():
+    # Test with real/imag transformation enabled (default) on a physical system
+    from pylcp import hamiltonians, Conventional3DMOTBeams, ConstantMagneticField
+    H0_g, muq_g = hamiltonians.singleF(F=0, gF=1.0)
+    H0_e, muq_e = hamiltonians.singleF(F=1, gF=1.0)
+    dqij = hamiltonians.dqij_two_bare_hyperfine(F=0, Fp=1, normalize=True)
+    ham = Hamiltonian(H0_g, H0_e, muq_g, muq_e, dqij, mass=87.0)
+    beams = Conventional3DMOTBeams(s=1.0, delta=-1.0)
+    mag = ConstantMagneticField(np.array([0.0, 0.0, 1.0]))
+
+    obe = OBE(beams, mag, ham, transform_into_re_im=True)
+
+    # Verify self.ev_mat.static is consistent with transformed decay + h0
+    assert np.allclose(obe.ev_mat.static, obe.ev_mat.decay + obe.ev_mat.h0, atol=1e-12)
+    assert np.all(np.isreal(obe.ev_mat.static))
+
