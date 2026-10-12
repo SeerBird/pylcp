@@ -13,7 +13,7 @@ from scipy.interpolate import interp1d
 
 from .fields import MagField, LaserBeams
 from .hamiltonian import Hamiltonian
-from .common import (Progressbar, random_vector, cart2spherical, spherical2cart, BaseForceProfile)
+from .util import (Progressbar, random_vector, cart2spherical, spherical2cart, BaseForceProfile)
 from .governingeq import GoverningEq
 from .integration_tools import solve_ivp_random
 from .rateeq import RateEq

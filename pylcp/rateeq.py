@@ -8,12 +8,12 @@ import numpy as np
 from scipy.integrate import solve_ivp
 from scipy.interpolate import interp1d
 
-from .fields import MagField
-from .hamiltonian import Hamiltonian
-from .common import (Progressbar, random_vector, BaseForceProfile)
-from .governingeq import GoverningEq
-from .integration_tools import solve_ivp_random
-from .typing import RateEqEvolutionMatrices, TransitionKey
+from pylcp.fields import MagField,LaserBeams
+from pylcp.hamiltonian import Hamiltonian
+from pylcp.util import (Progressbar, random_vector, BaseForceProfile)
+from pylcp.governingeq import GoverningEq
+from pylcp.integration_tools import solve_ivp_random
+from pylcp.typing import RateEqEvolutionMatrices, TransitionKey
 
 
 @numba.vectorize([numba.float64(numba.complex128), numba.float32(numba.complex64)])
@@ -107,7 +107,7 @@ class RateEq(GoverningEq):
     v0 : array_like, shape (3,), optional
         Initial velocity.  Default: [0., 0., 0.]
     """
-    def __init__(self, laserBeams, magField:MagField, hamiltonian:Hamiltonian,
+    def __init__(self, laserBeams:dict[TransitionKey,LaserBeams]|LaserBeams, magField:MagField, hamiltonian:Hamiltonian,
                  a=np.array([0., 0., 0.]), include_mag_forces=True,
                  svd_eps=1e-10, r0=np.array([0., 0., 0.]),
                  v0=np.array([0., 0., 0.])):

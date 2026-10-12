@@ -258,7 +258,7 @@ class GoverningEq(object):
 
         Returns
         -------
-        profile : pylcp.common.BaseForceProfile
+        profile : pylcp.util.BaseForceProfile
             Resulting force profile.
         """
         pass

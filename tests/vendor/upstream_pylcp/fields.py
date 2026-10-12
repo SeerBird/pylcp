@@ -1,6 +1,6 @@
 import numpy as np
 from inspect import signature
-from pylcp.common import cart2spherical, spherical2cart
+from .common import cart2spherical, spherical2cart
 from .integration_tools import parallelIntegrator
 from scipy.spatial.transform import Rotation
 

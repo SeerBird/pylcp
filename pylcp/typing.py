@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Any, Union, Iterator, Literal, Callable, TYPE_CHECKING, NamedTuple
+from typing import Any, Union, Iterator, Literal, Callable, TYPE_CHECKING, NamedTuple, TypeAlias
 import numpy as np
 import inspect
 
@@ -59,7 +59,7 @@ def _inspect_callable_dependence(func: Callable) -> Dependence:
                     "Seemingly space-dependent field parameter didn't accept" +
                     " np.zeros(3) as a parameter")
             return Dependence.POSITION_ONLY
-    else: # 2 params
+    else:  # 2 params
         try:
             func(np.zeros(3), 0)
         except Exception:
@@ -97,7 +97,7 @@ def validate_field_param_value(val: NumericScalar | VectorLike,
         return val
     else:  # validation_type == ValidationType.VectorLike
         # check if type of vector is correct
-        if not isinstance(val, tuple|np.ndarray|list):
+        if not isinstance(val, tuple | np.ndarray | list):
             raise TypeError(f"{name.capitalize()} {must_be} an array-like of 3 float "
                             f"or complex numbers")
         # region check if size of vector is correct
@@ -126,7 +126,7 @@ class FieldParameter:
     dependence: Dependence
 
     def __init__(
-            self, val: FieldParameterValue, name: str,validation_type: ValidationType):
+            self, val: FieldParameterValue, name: str, validation_type: ValidationType):
         self.name = name
 
         if not callable(val):
@@ -141,7 +141,7 @@ class FieldParameter:
             elif self.dependence == Dependence.TIME_ONLY:
                 validate_field_param_value(0., name, validation_type, True)
             else:
-                validate_field_param_value(self.val(np.zeros(3),0.), name, validation_type, True)
+                validate_field_param_value(self.val(np.zeros(3), 0.), name, validation_type, True)
             # endregion
 
     def __call__(self, R=np.array([0., 0., 0.]), t=0.):
@@ -159,33 +159,54 @@ class FieldParameter:
             return self.val(R, t)
 
 
-class TransitionKey(NamedTuple):
-    """Strongly typed representation of an atomic transition key (e.g. g->e)."""
-    ground: str
-    excited: str
+class PolarizationEnum(Enum):
+    """Enumeration of standard laser polarization states relative to beam k-vector."""
+    SIGMA_PLUS = +1  # sigma+ polarization (delta_mF = +1)
+    PI = 0  # pi polarization (delta_mF = 0)
+    SIGMA_MINUS = -1  # sigma- polarization (delta_mF = -1)
 
-    @property
-    def lower(self) -> str:
-        return self.ground
 
-    @property
-    def upper(self) -> str:
-        return self.excited
+Polarization: TypeAlias = (Vector3D  # spherical polar basis
+                           | PolarizationEnum
+                           | Callable[[Vector3D, float], Vector3D]
+                           | Callable[[Vector3D], Vector3D])
+
+
+class HyperfineKey(NamedTuple):
+    label: str
+    F: float
 
     def __str__(self) -> str:
-        return f"{self.ground}->{self.excited}"
+        return f"{self.label}_F{self.F:g}"
 
 
-@dataclass(frozen=True, slots=True)
-class Manifold:
-    """Strongly typed representation of an atomic/molecular state manifold (e.g. ground 'g' with N=3 states)."""
+class MagneticKey(NamedTuple):
     label: str
-    n: int
-
-    def __repr__(self) -> str:
-        return f"Manifold({self.label}, n={self.n})"
+    F: float
+    mF: float
 
 
+class TransitionKey(NamedTuple):
+    """Strongly typed representation of an atomic transition key (e.g. g->e)."""
+    lower: str
+    upper: str
+
+    def __str__(self) -> str:
+        return f"{self.lower}->{self.upper}"
+
+
+class HFTransitionKey(NamedTuple):
+    lower_key: HyperfineKey
+    upper_key: HyperfineKey
+
+    def __str__(self) -> str:
+        return f"{self.lower_key}->{self.upper_key}"
+
+    def to_transition(self) -> TransitionKey:
+        return TransitionKey(self.lower_key.label, self.upper_key.label)
+
+
+# region evolution matrix containers
 @dataclass
 class OBEEvolutionMatrices:
     """
@@ -305,3 +326,11 @@ class RateEqEvolutionMatrices:
 
     def __iter__(self) -> Iterator[str]:
         return iter(self.keys())
+
+
+# endregion
+
+def sort_float_then_string(numbers, strings):
+    energy_label_pairs = np.asarray([(numbers[i], strings[i]) for i in range(len(numbers))],
+                                    dtype=[('energy', float), ('label', 'S10')])
+    return np.argsort(energy_label_pairs, order=['energy', 'label'])

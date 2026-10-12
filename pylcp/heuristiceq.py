@@ -1,8 +1,8 @@
 import numpy as np
 from scipy.integrate import solve_ivp
 
-from .common import BaseForceProfile
-from .common import (Progressbar, random_vector)
+from .util import BaseForceProfile
+from .util import (Progressbar, random_vector)
 from .governingeq import GoverningEq
 from .integration_tools import solve_ivp_random
 from .typing import TransitionKey
@@ -345,7 +345,7 @@ class HeuristicEq(GoverningEq):
 
         Returns
         -------
-        profile : pylcp.common.BaseForceProfile
+        profile : pylcp.util.BaseForceProfile
             Resulting force profile.
         """
         if not name:

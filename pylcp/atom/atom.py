@@ -82,7 +82,7 @@ class State:
         self.Chfs = Chfs
 
 
-class Transition():
+class Transition:
     r"""
     Reference numbers for transitions.
 
