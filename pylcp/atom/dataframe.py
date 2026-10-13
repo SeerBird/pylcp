@@ -9,8 +9,8 @@ from typing import TypeAlias, Callable
 import numpy as np
 from scipy.constants import c, h
 
-from atom import State as Pylcp_state, Atom
-from pylcp import Hamiltonian
+from .atom import State as Pylcp_state, Atom
+from pylcp.hamiltonian import Hamiltonian
 from pylcp.obe import OBE
 from pylcp.rateeq import RateEq
 from pylcp.fields import MagField, LaserBeams, InfinitePlaneWaveBeam

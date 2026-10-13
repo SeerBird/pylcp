@@ -1,7 +1,10 @@
 from __future__ import annotations
+
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Any, Union, Iterator, Literal, Callable, TYPE_CHECKING, NamedTuple, TypeAlias
+from typing import Any, Union, Iterator, Literal, Callable, TYPE_CHECKING, NamedTuple, TypeAlias, \
+    TypeVar, Generic
 import numpy as np
 import inspect
 
@@ -102,33 +105,43 @@ def validate_field_param_value(val: NumericScalar | VectorLike,
                             f"or complex numbers")
         # region check if size of vector is correct
         not3error = ValueError(f"{name.capitalize()} {must_be} a vector with 3 components")
-        if isinstance(val, (list, tuple)):
+        if isinstance(val, (list, tuple,np.ndarray)):
             if len(val) != 3:
                 raise not3error
-            return np.asarray(val)
+            val = np.asarray(val)
+            if val.dtype==int:
+                val = val.astype(float)
+            return val
         else:
             if TYPE_CHECKING:
                 assert isinstance(val, np.ndarray)
+            val = np.asarray(val)
             if val.shape[0] != 3 or len(val.shape) != 1:  # TODO: this check may be wrong
                 raise not3error
+            if val.dtype==int:
+                val = val.astype(float)
             return val
         # endregion
         # TODO: check datatype?
 
 
-class FieldParameter:
+class FieldParameter(ABC):
     """
     Wraps a scalar, vector, or function parameter with explicit dependency metadata.
-    Avoids unnecessary lambda wrapping when the parameter is constant.
     """
     val: FieldParameterValue
     name: str
     dependence: Dependence
 
-    def __init__(
-            self, val: FieldParameterValue, name: str, validation_type: ValidationType):
+    def __init__(self, val: FieldParameterValue, name: str):
         self.name = name
+        self.validate_with_right_type(val, name)
 
+    @abstractmethod
+    def validate_with_right_type(self, val, name):
+        pass
+
+    def validate(self, val, name, validation_type):
         if not callable(val):
             self.dependence = Dependence.CONSTANT
             self.val = validate_field_param_value(val, name, validation_type, False)
@@ -159,14 +172,52 @@ class FieldParameter:
             return self.val(R, t)
 
 
+class ScalarFieldParameter(FieldParameter):
+    def __init__(self, val: FieldParameterValue, name: str):
+        super().__init__(val, name)
+
+    def validate_with_right_type(self, val, name):
+        self.validate(val, name, ValidationType.NumericScalar)
+
+
+class VectorFieldParameter(FieldParameter):
+    def __init__(self, val: FieldParameterValue, name: str):
+        super().__init__(val, name)
+
+    def validate_with_right_type(self, val, name):
+        self.validate(val, name, ValidationType.VectorLike)
+
+
+class CoordBasis(Enum):
+    SPHERICAL = auto()
+    CARTESIAN = auto()
+
+
 class PolarizationEnum(Enum):
     """Enumeration of standard laser polarization states relative to beam k-vector."""
-    SIGMA_PLUS = +1  # sigma+ polarization (delta_mF = +1)
-    PI = 0  # pi polarization (delta_mF = 0)
-    SIGMA_MINUS = -1  # sigma- polarization (delta_mF = -1)
+    SIGMA_PLUS = 1
+    PI = 0
+    SIGMA_MINUS = -1
+
+    def to_array(self)->np.ndarray:
+        """relative to the kvector"""
+        if self.value == PolarizationEnum.SIGMA_PLUS.value:
+            return np.array([0., 0., 1.], dtype='complex')
+        elif self.value == PolarizationEnum.PI.value:
+            return np.array([0., 1., 0.], dtype='complex')
+        else:
+            return np.array([1., 0., 0.], dtype='complex')
+
+    def opposite(self):
+        if self.value == PolarizationEnum.SIGMA_PLUS.value:
+            return PolarizationEnum.SIGMA_MINUS
+        elif self.value == PolarizationEnum.PI.value:
+            return PolarizationEnum.PI
+        else:
+            return PolarizationEnum.SIGMA_PLUS
 
 
-Polarization: TypeAlias = (Vector3D  # spherical polar basis
+Polarization: TypeAlias = (Vector3D
                            | PolarizationEnum
                            | Callable[[Vector3D, float], Vector3D]
                            | Callable[[Vector3D], Vector3D])

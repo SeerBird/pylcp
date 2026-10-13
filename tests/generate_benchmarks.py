@@ -234,7 +234,8 @@ def generate_all_benchmarks(data_dir: str = "tests/data"):
     # region OBE Motion (Coupled Optical Trajectory)
     print("\n[9/9] Running Upstream OBE evolve_motion...")
     t0 = time.perf_counter()
-    beam_obe_mot = upstream.laserBeam(**OBE_MOTION_BEAM_CONFIG)
+    kvec,pol,s,delta = OBE_MOTION_BEAM_CONFIG.values()
+    beam_obe_mot = upstream.laserBeam(kvec,pol.value,s,delta)
     beams_obe_mot = upstream.laserBeams([beam_obe_mot])
 
     obe_mot = upstream.obe(beams_obe_mot, mag_const0, H_obj, transform_into_re_im=True)

@@ -109,7 +109,7 @@ def _d_q_matrix_element(J, F, m_F, Jp, Fp, m_Fp, q, I):
 
 def mu_q_coupled(basis, gJ, gI, J, I):
     Fs, mFs = basis
-    n = len(Fs)
+    n = len(Fs) # TODO: get a two-state version of this
     mu_q = np.zeros((3, n, n))
     count = 0
     for ii, q in enumerate(range(-1, 2)):
@@ -132,6 +132,7 @@ def mu_q_coupled(basis, gJ, gI, J, I):
                                                    * wig6j(I, F2, J, F1, I, 1)
                                                    * np.sqrt(I * (I + 1) * (2 * I + 1)))
     return mu_q
+
 
 
 def hyperfine_correction(J, I, F, hf_coefs):
@@ -294,8 +295,9 @@ def add_conventional_MOT_laser_kvecs_and_pols():
     kvecs = [np.array([1., 0., 0.]), np.array([-1., 0., 0.]),
              np.array([0., 1., 0.]), np.array([0., -1., 0.]),
              np.array([0., 0., 1.]), np.array([0., 0., -1.])]
-    pol = 1
-    pols = [-pol, -pol, -pol, -pol, +pol, +pol]
+    pol = PolarizationEnum.SIGMA_MINUS
+    opp = pol.opposite()
+    pols = [opp,opp,opp,opp, pol, pol]
     lasers = []
     for kvec, _pol in zip(kvecs, pols):
         lasers.append((rot_mat @ kvec, _pol))

@@ -9,6 +9,8 @@ from here to ensure that benchmark generation and testing remain in lockstep.
 
 import numpy as np
 
+from pylcp.typing import PolarizationEnum
+
 # ==============================================================================
 # 1. Standard 2-Level System (F_g = 0 -> F_e = 1)
 # ==============================================================================
@@ -82,7 +84,7 @@ OBE_DENSITY_TIME = {
 
 # OBE Motion Evolution (Coupled trajectory)
 OBE_MOTION_BEAM_CONFIG = {
-    "kvec": np.array([0, 0, 1]), "pol": 1,
+    "kvec": np.array([0, 0, 1]), "pol": PolarizationEnum.SIGMA_PLUS,
     "s": 1.0, "delta": -1.0
 }
 OBE_MOTION_R0 = np.array([0.0, 0.0, 0.0])

@@ -24,6 +24,8 @@ import concurrent.futures
 from typing import Callable, Tuple, Any
 import numpy as np
 
+from pylcp.typing import PolarizationEnum
+
 # Ensure root directory is on sys.path
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
@@ -335,7 +337,7 @@ def run_benchmark():
     obe8_mot_up.set_initial_position_and_velocity(np.zeros(3), np.array([0.0, 0.0, 0.5]))
     obe8_mot_up.set_initial_rho_equally()
 
-    beam_mot_fk = fork.LaserBeam(kvec=np.array([0, 0, 1]), pol=1, s=1.0, delta=-1.0)
+    beam_mot_fk = fork.LaserBeam(kvec=np.array([0, 0, 1]), pol=PolarizationEnum.SIGMA_PLUS, s=1.0, delta=-1.0)
     beams_mot_fk = fork.LaserBeams([beam_mot_fk])
     obe8_mot_fk = fork.OBE(beams_mot_fk, mag_zero_fk, H8_fk, transform_into_re_im=True)
     obe8_mot_fk.set_initial_position_and_velocity(np.zeros(3), np.array([0.0, 0.0, 0.5]))

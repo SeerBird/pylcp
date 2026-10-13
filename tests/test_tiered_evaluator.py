@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from pylcp.typing import Dependence, FieldParameter, ValidationType
+from pylcp.typing import Dependence, FieldParameter, ValidationType, ScalarFieldParameter
 import pylcp as fork
 
 
@@ -15,7 +15,7 @@ def test_dependence_ordering():
 
 def test_field_parameter_constant():
     """Verify FieldParameter wraps constants directly without lambdas."""
-    param = FieldParameter(5.0, "test_const",ValidationType.NumericScalar)
+    param = ScalarFieldParameter(5.0, "test_const")
     assert param.dependence == Dependence.CONSTANT
     assert param.val == 5.0
     assert param(R=np.array([1, 2, 3]), t=10.0) == 5.0
@@ -26,7 +26,7 @@ def test_field_parameter_spatial():
     def spatial_func(pos):
         return pos[0] * 2.0
 
-    param = FieldParameter(spatial_func, "test_spatial",ValidationType.NumericScalar)
+    param = ScalarFieldParameter(spatial_func, "test_spatial")
     assert param.dependence == Dependence.POSITION_ONLY
     res = param(R=np.array([3.0, 0.0, 0.0]), t=5.0)
     assert res == 6.0
@@ -37,7 +37,7 @@ def test_field_parameter_temporal():
     def temporal_func(t):
         return t ** 2
 
-    param = FieldParameter(temporal_func, "test_temporal",ValidationType.NumericScalar)
+    param = ScalarFieldParameter(temporal_func, "test_temporal")
     assert param.dependence == Dependence.TIME_ONLY
     res = param(R=np.array([0.0, 0.0, 0.0]), t=4.0)
     assert res == 16.0
@@ -48,7 +48,7 @@ def test_field_parameter_spatiotemporal():
     def full_func(pos, time):
         return pos[0] + time
 
-    param = FieldParameter(full_func, "test_full",ValidationType.NumericScalar)
+    param = ScalarFieldParameter(full_func, "test_full")
     assert param.dependence == Dependence.POSITION_AND_TIME
     res = param(R=np.array([2.0, 0.0, 0.0]), t=3.0)
     assert res == 5.0
