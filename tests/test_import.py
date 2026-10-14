@@ -22,3 +22,4 @@ def test_basic_exports():
     assert hasattr(pylcp, "LaserBeams")
     assert hasattr(pylcp, "TransitionKey")
     assert hasattr(pylcp, "Dependence")
+    assert hasattr(pylcp, "PolarizationEnum")

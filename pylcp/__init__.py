@@ -14,4 +14,5 @@ from .hamiltonian import Hamiltonian
 from .fields import (MagField, ConstantMagneticField, QuadrupoleMagneticField, IPMagneticField,
                      LaserBeam, LaserBeams, InfinitePlaneWaveBeam, GaussianBeam,
                      ClippedGaussianBeam, Conventional3DMOTBeams)
-from .typing import Dependence, TransitionKey, OBEEvolutionMatrices, RateEqEvolutionMatrices
+from .typing import (Dependence, TransitionKey, OBEEvolutionMatrices, RateEqEvolutionMatrices,
+                     PolarizationEnum)

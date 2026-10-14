@@ -5,7 +5,7 @@ from scipy.spatial.transform import Rotation
 from pylcp.util import cart2spherical, spherical2cart
 from .integration_tools import Parallelintegrator
 from .typing import VectorFieldParameter, ScalarFieldParameter, Polarization, \
-    CoordBasis, PolarizationEnum
+    CoordBasis, PolarizationEnum, Dependence
 
 
 @numba.njit
@@ -36,9 +36,6 @@ def return_dx_dy_dz(R: np.ndarray, eps):
         dz[2] = eps
 
     return dx, dy, dz
-
-
-from .typing import Dependence
 
 
 class MagField(object):
@@ -330,7 +327,6 @@ class QuadrupoleMagneticField(MagField):
         return self.constant_grad_field
 
 
-# First, define the laser beam class:
 class LaserBeam:
     """
     The base class for a single laser beam
@@ -390,40 +386,40 @@ class LaserBeam:
         Overall phase of the laser beam.
     """
 
-    def __init__(self, kvec, s, pol: Polarization, delta=None,
+    def __init__(self, kvec, s, pol: Polarization, delta=0.,
                  phase=0., pol_coord: CoordBasis = CoordBasis.SPHERICAL, eps=1e-5):
         self.kvec = VectorFieldParameter(kvec, "kvec")
-
         self.intensity = ScalarFieldParameter(s, "s")
 
         if isinstance(pol, PolarizationEnum):
-            pol = self.project_pol(self.kvec() / np.linalg.norm(self.kvec()),
-                                   pol=pol.to_array(), invert=True).astype('complex128')
-        self.pol = VectorFieldParameter(pol, "polarization")
-        if isinstance(self.pol.val, np.ndarray):
+            k_hat = self.kvec() / np.linalg.norm(self.kvec())
+            pol_arr = self.project_pol(k_hat, pol=pol.to_array(), invert=True).astype('complex128')
+        elif isinstance(pol, (list, tuple, np.ndarray)):
+            pol_arr = np.asarray(pol)
             if pol_coord == CoordBasis.CARTESIAN:
-                self.pol.val = cart2spherical(self.pol.val)
-            self.pol.val /= np.linalg.norm(self.pol.val)
-        # TODO: consider adding the transverseness check back in
+                pol_arr = cart2spherical(pol_arr)
+            pol_arr = pol_arr / np.linalg.norm(pol_arr)
+        else:
+            pol_arr = pol
 
-        self.delta: ScalarFieldParameter = ScalarFieldParameter(delta, "delta")
+        self.pol = VectorFieldParameter(pol_arr, "polarization")
+
+        delta_val = 0.0 if delta is None else delta
+        self.delta: ScalarFieldParameter = ScalarFieldParameter(delta_val, "delta")
 
         if self.delta.dependence == Dependence.TIME_ONLY or self.delta.dependence == Dependence.POSITION_AND_TIME:
-            self.delta_phase = Parallelintegrator(self.delta)  # TODO: this doesn't work AT ALL
+            self.delta_phase = Parallelintegrator(self.delta)
         else:
-            self.delta_phase = lambda t: self.delta.val * t
+            self.delta_phase = lambda t: self.delta(t=t) * t
 
         self.phase = ScalarFieldParameter(phase, 'phase')
         self.eps = eps
 
     @property
     def dependence(self) -> Dependence:
-        deps = []
-        for attr in ('_kvec_param', '_intensity_param', '_pol_param', '_delta_param',
-                     '_phase_param'):
-            if hasattr(self, attr):
-                deps.append(getattr(self, attr).dependence)
-        return max(deps) if deps else Dependence.CONSTANT
+        deps = [self.kvec.dependence, self.intensity.dependence, self.pol.dependence,
+                self.delta.dependence, self.phase.dependence]
+        return max(deps)
 
     def project_pol(self, quant_axis: np.ndarray, R=np.array([0., 0., 0.]), t=0,
                     treat_nans=False, calculate_norm=False, invert=False, pol=None) -> np.ndarray:
@@ -862,8 +858,8 @@ class GaussianBeam(LaserBeam):
         if callable(pol):
             raise TypeError('Polarization cannot be a function for a Gaussian beam.')
 
-        # Use super class to define kvec(R, t), pol(R, t), and delta(t)
-        super().__init__(kvec=kvec, pol=pol, delta=delta, **kwargs)
+        # Use super class to define kvec(R, t), s, pol(R, t), and delta(t)
+        super().__init__(kvec=kvec, s=s, pol=pol, delta=delta, **kwargs)
 
         # Save the constant values (might be useful):
         self.con_kvec = kvec
@@ -889,6 +885,10 @@ class GaussianBeam(LaserBeam):
         rho_sq = np.sum(Rp[:2] ** 2, axis=0)
         # Return the intensity:
         return self.s_max * np.exp(-2 * rho_sq / self.wb ** 2)
+
+    @property
+    def dependence(self) -> Dependence:
+        return max(super().dependence, Dependence.POSITION_ONLY)
 
 
 class ClippedGaussianBeam(GaussianBeam):

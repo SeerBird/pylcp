@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Any, Union, Iterator, Literal, Callable, TYPE_CHECKING, NamedTuple, TypeAlias, \
@@ -49,7 +48,7 @@ def _inspect_callable_dependence(func: Callable) -> Dependence:
         parameter = params[0].lower()
         if parameter in ('t', 'time'):
             try:
-                func(0)
+                func(0.0)
             except Exception:
                 raise ValueError(
                     "Seemingly time-dependent field parameter didn't accept 0 as a parameter")
@@ -64,7 +63,7 @@ def _inspect_callable_dependence(func: Callable) -> Dependence:
             return Dependence.POSITION_ONLY
     else:  # 2 params
         try:
-            func(np.zeros(3), 0)
+            func(np.zeros(3), 0.0)
         except Exception:
             raise ValueError("A two-argument function should take position first and time second")
         return Dependence.POSITION_AND_TIME
@@ -84,108 +83,94 @@ FieldCallable = (Callable[[np.ndarray], VectorLike | NumericScalar]
 # Full comprehensive parameter value type:
 FieldParameterValue = NumericScalar | VectorLike | FieldCallable
 
-
-class ValidationType(Enum):
-    VectorLike = auto()
-    NumericScalar = auto()
+T = TypeVar("T")
 
 
-def validate_field_param_value(val: NumericScalar | VectorLike,
-                               name: str, validation_type: ValidationType, error_text_for_callable):
-    must_be = f"{'function must return' if error_text_for_callable else 'must be'}"
-    if validation_type == ValidationType.NumericScalar:
-        # check if type of constant is correct
-        if not isinstance(val, float | complex):
-            raise TypeError(f"{name.capitalize()} {must_be} a float or complex number")
-        return val
-    else:  # validation_type == ValidationType.VectorLike
-        # check if type of vector is correct
-        if not isinstance(val, tuple | np.ndarray | list):
-            raise TypeError(f"{name.capitalize()} {must_be} an array-like of 3 float "
-                            f"or complex numbers")
-        # region check if size of vector is correct
-        not3error = ValueError(f"{name.capitalize()} {must_be} a vector with 3 components")
-        if isinstance(val, (list, tuple,np.ndarray)):
-            if len(val) != 3:
-                raise not3error
-            val = np.asarray(val)
-            if val.dtype==int:
-                val = val.astype(float)
-            return val
-        else:
-            if TYPE_CHECKING:
-                assert isinstance(val, np.ndarray)
-            val = np.asarray(val)
-            if val.shape[0] != 3 or len(val.shape) != 1:  # TODO: this check may be wrong
-                raise not3error
-            if val.dtype==int:
-                val = val.astype(float)
-            return val
-        # endregion
-        # TODO: check datatype?
-
-
-class FieldParameter(ABC):
+class FieldParameter(Generic[T]):
     """
     Wraps a scalar, vector, or function parameter with explicit dependency metadata.
     """
-    val: FieldParameterValue
+    val: Any
     name: str
     dependence: Dependence
 
-    def __init__(self, val: FieldParameterValue, name: str):
+    def __init__(self, val: Any, name: str = ""):
         self.name = name
-        self.validate_with_right_type(val, name)
-
-    @abstractmethod
-    def validate_with_right_type(self, val, name):
-        pass
-
-    def validate(self, val, name, validation_type):
         if not callable(val):
             self.dependence = Dependence.CONSTANT
-            self.val = validate_field_param_value(val, name, validation_type, False)
+            self.val = self._validate_constant(val)
         else:
             self.val = val
             self.dependence = _inspect_callable_dependence(val)
-            # region validate func returns at zeroes
-            if self.dependence == Dependence.POSITION_ONLY:
-                validate_field_param_value(self.val(np.zeros(3)), name, validation_type, True)
-            elif self.dependence == Dependence.TIME_ONLY:
-                validate_field_param_value(0., name, validation_type, True)
-            else:
-                validate_field_param_value(self.val(np.zeros(3), 0.), name, validation_type, True)
-            # endregion
+            self._validate_callable(val)
 
-    def __call__(self, R=np.array([0., 0., 0.]), t=0.):
+    def _validate_constant(self, val: Any) -> Any:
+        return val
+
+    def _validate_callable(self, func: Callable) -> None:
+        pass
+
+    def __call__(self, R: np.ndarray | None = None, t: float = 0.) -> T:
         if self.dependence == Dependence.CONSTANT:
             return self.val
 
-        if TYPE_CHECKING:
-            assert callable(self.val)
+        if self.dependence == Dependence.TIME_ONLY:
+            time_val = t if R is None else (R if isinstance(R, (int, float, np.number)) else t)
+            return self.val(time_val)
 
+        pos = np.zeros(3) if R is None else R
         if self.dependence == Dependence.POSITION_ONLY:
-            return self.val(R)
-        elif self.dependence == Dependence.TIME_ONLY:
-            return self.val(t)
+            return self.val(pos)
         else:
-            return self.val(R, t)
+            return self.val(pos, t)
 
 
-class ScalarFieldParameter(FieldParameter):
-    def __init__(self, val: FieldParameterValue, name: str):
-        super().__init__(val, name)
+class ScalarFieldParameter(FieldParameter[float]):
+    """
+    Field parameter returning a scalar float or complex number.
+    """
+    def _validate_constant(self, val: Any) -> float | complex:
+        if isinstance(val, bool):
+            raise TypeError(f"{self.name.capitalize()} must be a float or complex number, got bool")
+        if isinstance(val, (int, float, np.floating, np.integer)):
+            return float(val)
+        elif isinstance(val, (complex, np.complexfloating)):
+            return complex(val)
+        else:
+            raise TypeError(f"{self.name.capitalize()} must be a float or complex number, got {type(val).__name__}")
 
-    def validate_with_right_type(self, val, name):
-        self.validate(val, name, ValidationType.NumericScalar)
+    def _validate_callable(self, func: Callable) -> None:
+        res = self(np.zeros(3), 0.0)
+        if isinstance(res, bool) or not isinstance(res, (float, complex, np.floating, np.complexfloating)):
+            raise TypeError(f"{self.name.capitalize()} callable must return a float or complex number, got {type(res).__name__}")
 
 
-class VectorFieldParameter(FieldParameter):
-    def __init__(self, val: FieldParameterValue, name: str):
-        super().__init__(val, name)
+class VectorFieldParameter(FieldParameter[np.ndarray]):
+    """
+    Field parameter returning a 3-element vector (numpy ndarray).
+    """
+    def _validate_constant(self, val: Any) -> np.ndarray:
+        if not isinstance(val, (list, tuple, np.ndarray)):
+            raise TypeError(f"{self.name.capitalize()} must be an array-like of 3 float or complex numbers, got {type(val).__name__}")
+        if len(val) != 3:
+            raise ValueError(f"{self.name.capitalize()} must be a vector with 3 components, got {len(val)}")
+        arr = np.asarray(val)
+        if arr.shape != (3,):
+            raise ValueError(f"{self.name.capitalize()} must be a vector with 3 components, got {arr.shape}")
+        if np.issubdtype(arr.dtype, np.integer):
+            arr = arr.astype(float)
+        elif not (np.issubdtype(arr.dtype, np.floating) or np.issubdtype(arr.dtype, np.complexfloating)):
+            raise TypeError(f"{self.name.capitalize()} must be an array-like of 3 float or complex numbers, got {arr.dtype}")
+        return arr
 
-    def validate_with_right_type(self, val, name):
-        self.validate(val, name, ValidationType.VectorLike)
+    def _validate_callable(self, func: Callable) -> None:
+        res = self(np.zeros(3), 0.0)
+        if not isinstance(res, np.ndarray):
+            raise TypeError(f"{self.name.capitalize()} callable must return a numpy ndarray, got {type(res).__name__}")
+        if res.shape != (3,):
+            raise ValueError(f"{self.name.capitalize()} callable must return a vector with shape (3,), got {res.shape}")
+        if np.issubdtype(res.dtype, np.integer):
+            raise TypeError(f"{self.name.capitalize()} callable must return a float or complex array, got integer dtype {res.dtype}")
 
 
 class CoordBasis(Enum):
