@@ -6,7 +6,7 @@ import numpy as np
 
 if TYPE_CHECKING:
     from .hamiltonian import Hamiltonian
-from .fields import MagField, LaserBeams
+from .fields import MagField, LaserBeams, RFField
 from .typing import TransitionKey, Dependence
 from scipy.optimize import root_scalar, root
 
@@ -103,17 +103,34 @@ class GoverningEq(object):
 
         # Add lasers:
         default_tk = TransitionKey('g', 'e')
-        self.laserBeams: dict[TransitionKey, LaserBeams] = {}
+        all_laser_beams: dict[TransitionKey, LaserBeams] = {}
         if isinstance(laserBeams, LaserBeams):
-            self.laserBeams[default_tk] = copy.copy(laserBeams)
+            all_laser_beams[default_tk] = copy.copy(laserBeams)
         elif isinstance(laserBeams, dict):
-            key: TransitionKey
-            laserBeams: dict[TransitionKey, LaserBeams]
-            for key in laserBeams:
-                # TODO: check keys and values are valid
-                self.laserBeams[key] = copy.copy(laserBeams[key])
+            for key, val in laserBeams.items():
+                if not isinstance(key, TransitionKey):
+                    raise TypeError(
+                        f"laserBeams dictionary keys must be TransitionKey instances, "
+                        f"got {type(key).__name__}: {key!r}"
+                    )
+                if key.lower == key.upper:
+                    raise ValueError(
+                        f"Laser beams cannot address diagonal transition {key} within the same manifold."
+                    )
+                if not isinstance(val, LaserBeams):
+                    raise TypeError(
+                        f"Value for transition {key} in laserBeams must be LaserBeams, "
+                        f"got {type(val).__name__}: {val!r}."
+                    )
+                all_laser_beams[key] = copy.copy(val)
         else:
-            raise TypeError('laserBeams is not a valid type.')
+            raise TypeError(
+                f"laserBeams must be LaserBeams or dict[TransitionKey, LaserBeams], "
+                f"got {type(laserBeams).__name__}: {laserBeams!r}."
+            )
+
+        self.electric_lasers: dict[TransitionKey, LaserBeams] = {}
+        self.magnetic_lasers: dict[TransitionKey, LaserBeams] = {}
 
         # Add in magnetic field:
         if callable(magField) or isinstance(magField, np.ndarray):
@@ -128,13 +145,47 @@ class GoverningEq(object):
                 assert self.hamiltonian is not None
             self.hamiltonian.make_full_matrices()
 
-            # Next, check to see if there is consistency in k:
-            # Check that laser beam keys and Hamiltonian keys match.
-            for laser_key in self.laserBeams.keys():
-                if not laser_key in self.hamiltonian.blocks_by_keys.keys():
-                    raise ValueError(f'laserBeams dictionary key {laser_key} ' +
-                                     'does not have a corresponding key in the ' +
-                                     'Hamiltonian d_q.')
+            # Validate each LaserBeam against Hamiltonian and partition:
+            for laser_key, beams in all_laser_beams.items():
+                if laser_key not in self.hamiltonian.blocks_by_keys:
+                    raise KeyError(
+                        f"laserBeams transition {laser_key} does not exist in Hamiltonian."
+                    )
+                fb = self.hamiltonian.blocks_by_keys[laser_key]
+                if fb.d_q is not None and fb.mu_q is not None:
+                    raise ValueError(
+                        f"Transition {laser_key} has both electric dipole (d_q) and "
+                        f"magnetic dipole (mu_q) blocks, which violates parity conservation."
+                    )
+
+                if len(beams.beam_vector) == 0:
+                    if fb.d_q is None and fb.mu_q is None:
+                        raise ValueError(
+                            f"Transition {laser_key} has neither an electric dipole (d_q) "
+                            f"nor a magnetic dipole (mu_q) coupling."
+                        )
+
+                for beam in beams.beam_vector:
+                    if isinstance(beam, RFField):
+                        if fb.mu_q is None:
+                            raise ValueError(
+                                f"RFField addresses transition {laser_key}, but no magnetic "
+                                f"dipole (mu_q) block exists on this transition in the Hamiltonian."
+                            )
+                    else:
+                        if fb.d_q is None:
+                            raise ValueError(
+                                f"LaserBeam addresses transition {laser_key}, but no electric "
+                                f"dipole (d_q) block exists on this transition in the Hamiltonian "
+                                f"(use RFField for magnetic transitions)."
+                            )
+
+                if fb.d_q is not None:
+                    self.electric_lasers[laser_key] = beams
+                else:
+                    self.magnetic_lasers[laser_key] = beams
+        else:
+            self.electric_lasers = all_laser_beams
 
         # Check the acceleration:
         if not isinstance(a, np.ndarray):
@@ -155,6 +206,11 @@ class GoverningEq(object):
 
         # Instantiate evaluator strategy:
         self.evaluator = self._create_evaluator()
+
+    @property
+    def laserBeams(self) -> dict[TransitionKey, LaserBeams]:
+        """Combined dictionary of all active electric and magnetic laser beams."""
+        return {**self.electric_lasers, **self.magnetic_lasers}
 
     @property
     def dependence(self) -> Dependence:

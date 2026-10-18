@@ -13,6 +13,7 @@ from .obe import OBE
 from .hamiltonian import Hamiltonian
 from .fields import (MagField, ConstantMagneticField, QuadrupoleMagneticField, IPMagneticField,
                      LaserBeam, LaserBeams, InfinitePlaneWaveBeam, GaussianBeam,
-                     ClippedGaussianBeam, Conventional3DMOTBeams)
+                     ClippedGaussianBeam, Conventional3DMOTBeams,
+                     RFField)
 from .typing import (Dependence, TransitionKey, OBEEvolutionMatrices, RateEqEvolutionMatrices,
                      PolarizationEnum)

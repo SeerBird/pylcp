@@ -64,6 +64,11 @@ class TransitionData:
         self.gamma = gamma  # Hz
 
 
+class MagneticTransitionData:
+    def __init__(self, muB: float = 1.0):
+        self.muB = float(muB)
+
+
 class LaserData:
     freq: float
     kvec: np.ndarray
@@ -94,6 +99,12 @@ class LaserData:
             if kvec is None or pol is None or intensity is None:
                 raise ValueError(
                     "kvec, pol, and intensity must be provided when constructing LaserData from individual arguments.")
+            if isinstance(pol, (int, float)) and not isinstance(pol, PolarizationEnum):
+                raise TypeError(
+                    f"Scalar polarization ({pol}) is unsupported. "
+                    "Use PolarizationEnum.SIGMA_PLUS / SIGMA_MINUS for circular polarization along k-vector, "
+                    "or provide a 3D polarization vector."
+                )
             self.freq = float(freq)
             self.kvec = np.array(kvec, copy=True)
             self.pol = pol
@@ -107,7 +118,7 @@ class LaserData:
 Y = TypeVar("Y", bound = LaserData)
 class LaserFreqGroup(Generic[Y]):
     freq: float
-    transition: TransitionKey
+    transition: TransitionKey | HFTransitionKey
     lasers: list[Y]
     enabled_transitions: list[HFTransitionKey]
 
@@ -116,12 +127,12 @@ class LaserFreqGroup(Generic[Y]):
         """Initialize a LaserFreqGroup instance by copying from an existing LaserFreqGroup object."""
 
     @overload
-    def __init__(self, freq: float, transition: TransitionKey,
+    def __init__(self, freq: float, transition: TransitionKey | HFTransitionKey,
                  enabled_transitions: list[HFTransitionKey] | None = None):
         """Initialize a LaserFreqGroup instance from explicit frequency and transition key,
         and optional enabled_transitions"""
 
-    def __init__(self, freq: "float | LaserFreqGroup", transition: TransitionKey | None = None,
+    def __init__(self, freq: "float | LaserFreqGroup", transition: TransitionKey | HFTransitionKey | None = None,
                  enabled_transitions: list[HFTransitionKey] | None = None):
         if isinstance(freq, LaserFreqGroup):
             other = freq
@@ -149,7 +160,7 @@ T = TypeVar('T', bound=LaserFreqGroup)
 
 
 class LaserTransitionGroup(Generic[T]):
-    transition: TransitionKey
+    transition: TransitionKey | HFTransitionKey
     freq_groups: dict[float, T]
 
     @overload
@@ -157,10 +168,10 @@ class LaserTransitionGroup(Generic[T]):
         """Initialize a LaserTransitionGroup instance by copying from an existing LaserTransitionGroup object."""
 
     @overload
-    def __init__(self, transition: TransitionKey):
+    def __init__(self, transition: TransitionKey | HFTransitionKey):
         """Initialize a LaserTransitionGroup instance from explicit transition key."""
 
-    def __init__(self, transition: "TransitionKey | LaserTransitionGroup"):
+    def __init__(self, transition: "TransitionKey | HFTransitionKey | LaserTransitionGroup"):
         if isinstance(transition, LaserTransitionGroup):
             other = transition
             self.transition = other.transition

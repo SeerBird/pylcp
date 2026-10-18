@@ -118,6 +118,12 @@ class RateEq(GoverningEq):
         if self.hamiltonian is None:
             raise ValueError("RateEq hamiltonian cannot be None")
 
+        if len(self.magnetic_lasers) > 0:
+            raise NotImplementedError(
+                "RateEq only models spontaneous-scattering-dominated electric dipole transitions. "
+                "Use OBE to model coherent magnetic/RF transitions."
+            )
+
         self.include_mag_forces = include_mag_forces
         self.svd_eps = svd_eps
         self.ev_mat = RateEqEvolutionMatrices()
@@ -210,7 +216,7 @@ class RateEq(GoverningEq):
         """
         This method calculates the pumping rates for each laser beam:
         """
-        for key in self.laserBeams:
+        for key, beams in self.electric_lasers.items():
             # Extract the relevant d_q matrix:
             rot_fb = self.hamiltonian.rotated_hamiltonian.blocks_by_keys[key]
             d_q = rot_fb.d_q.matrix
@@ -225,15 +231,15 @@ class RateEq(GoverningEq):
             E2, E1 = np.meshgrid(E2, E1)
 
             # Initialize the pumping matrix:
-            self.Rijl[key] = np.zeros((len(self.laserBeams[key].beam_vector),) +
+            self.Rijl[key] = np.zeros((len(beams.beam_vector),) +
                                       d_q.shape[1:])
 
             # Grab the laser parameters:
-            kvecs = self.laserBeams[key].kvec(r, t)
-            intensities = self.laserBeams[key].intensity(r, t)
-            deltas = self.laserBeams[key].delta(t)
+            kvecs = beams.kvec(r, t)
+            intensities = beams.intensity(r, t)
+            deltas = beams.delta(t)
 
-            projs = self.laserBeams[key].project_pol(Bhat, R=r, t=t)
+            projs = beams.project_pol(Bhat, R=r, t=t)
 
             # Loop through each laser beam driving this transition:
             for ll, (kvec, intensity, proj, delta) in enumerate(zip(kvecs, intensities, projs, deltas)):
@@ -247,7 +253,7 @@ class RateEq(GoverningEq):
 
     def _add_pumping_rates_to_Rev(self):
         # Now add the pumping rates into the rate equation propogation matrix:
-        for key in self.laserBeams:
+        for key in self.electric_lasers:
             fb = self.hamiltonian.rotated_hamiltonian.blocks_by_keys[key]
 
             n_off = fb.noffset
@@ -403,8 +409,8 @@ class RateEq(GoverningEq):
         F = np.zeros((3,))
         f = {}
 
-        for key in self.laserBeams:
-            f[key] = np.zeros((3, len(self.laserBeams[key].beam_vector)))
+        for key, beams in self.electric_lasers.items():
+            f[key] = np.zeros((3, len(beams.beam_vector)))
 
             fb = self.hamiltonian.blocks_by_keys[key]
             n_off = fb.noffset
@@ -414,7 +420,7 @@ class RateEq(GoverningEq):
 
             Ne, Ng = np.meshgrid(N[m_off:(m_off+m)], N[n_off:(n_off+n)], )
 
-            for ll, beam in enumerate(self.laserBeams[key].beam_vector):
+            for ll, beam in enumerate(beams.beam_vector):
                 kvec = beam.kvec(r, t)
                 f[key][:, ll] += kvec*np.sum(self.Rijl[key][ll]*(Ng - Ne), axis=(0,1))
 
@@ -620,7 +626,7 @@ class RateEq(GoverningEq):
             num_of_scatters = 0
 
             # Go over all available keys:
-            for key in self.laserBeams:
+            for key, beams in self.electric_lasers.items():
                 # Extract the pumping rate from each laser:
                 Rl = np.sum(self.Rijl[key], axis=(1,2))
 
@@ -633,7 +639,7 @@ class RateEq(GoverningEq):
                 # Give them kicks!
                 for ii in np.arange(len(Rl))[dice<P]:
                     num_of_scatters += 1
-                    y[-6:-3] += self.laserBeams[key].beam_vector[ii].kvec(y[-3:], t)/\
+                    y[-6:-3] += beams.beam_vector[ii].kvec(y[-3:], t)/\
                                 self.hamiltonian.mass
                     # Can branch to a differe, lower state, but let's ignore that
                     # for the moment.

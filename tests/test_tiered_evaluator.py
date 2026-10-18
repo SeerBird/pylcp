@@ -165,7 +165,7 @@ def test_beam_parameter_types_and_dependence():
     t_beam = fork.LaserBeam(
         kvec=[0, 0, 1],
         s=lambda t: 2.5 * t,
-        pol=fork.PolarizationEnum.PI,
+        pol=fork.PolarizationEnum.SIGMA_PLUS,
         delta=0.0
     )
     assert t_beam.dependence == Dependence.TIME_ONLY

@@ -48,14 +48,14 @@ def project_polarization_spherical(kvec: np.ndarray, pol: Polarization) -> np.nd
         [(1 - cosbeta) / 2 * np.exp(1j * gamma), sinbeta / np.sqrt(2),
          (1 + cosbeta) / 2 * np.exp(-1j * gamma)]
     ])
-    pol: int | float | PolarizationEnum
+    pol: PolarizationEnum
     # Convert enum or scalar to beam frame spherical basis
-    if pol == PolarizationEnum.SIGMA_PLUS or pol in (+1, 1.0):
+    if pol == PolarizationEnum.SIGMA_PLUS:
         p_beam = np.array([0.0, 0.0, 1.0], dtype=complex)
-    elif pol == PolarizationEnum.SIGMA_MINUS or pol in (-1, -1.0):
+    elif pol == PolarizationEnum.SIGMA_MINUS:
         p_beam = np.array([1.0, 0.0, 0.0], dtype=complex)
-    else:  # PI / 0
-        p_beam = np.array([0.0, 1.0, 0.0], dtype=complex)
+    else:
+        raise ValueError(f"Invalid beam-frame polarization: {pol}. Transverse light relative to k must be SIGMA_PLUS or SIGMA_MINUS.")
 
     return np.linalg.inv(D) @ p_beam
 
@@ -107,16 +107,20 @@ def _d_q_matrix_element(J, F, m_F, Jp, Fp, m_Fp, q, I):
         wig3j(F, 1, Fp, -m_F, q, m_Fp) * wig6j(J, F, I, Fp, Jp, 1)
 
 
-def mu_q_coupled(basis, gJ, gI, J, I):
-    Fs, mFs = basis
-    n = len(Fs) # TODO: get a two-state version of this
-    mu_q = np.zeros((3, n, n))
-    count = 0
+def mu_q_coupled_two_states(basis1, basis2, gJ, gI, J, I):
+    """
+    Calculates the magnetic dipole matrix elements between two hyperfine bases (basis1, basis2).
+    Returns a (3, N1, N2) array in spherical basis (q = -1, 0, +1).
+    """
+    Fs1, mFs1 = basis1
+    Fs2, mFs2 = basis2
+    n1 = len(Fs1)
+    n2 = len(Fs2)
+    mu_q = np.zeros((3, n1, n2))
     for ii, q in enumerate(range(-1, 2)):
-        for index_1 in range(n):
-            for index_2 in range(n):
-                count += 1
-                F1, F2, mF1, mF2 = Fs[index_1], Fs[index_2], mFs[index_1], mFs[index_2]
+        for index_1 in range(n1):
+            for index_2 in range(n2):
+                F1, F2, mF1, mF2 = Fs1[index_1], Fs2[index_2], mFs1[index_1], mFs2[index_2]
                 if mF1 == mF2 + q:
                     mu_q[ii, index_1, index_2] -= (gJ * (-1) ** np.abs(F1 - mF1)
                                                    * wig3j(F1, 1, F2, -mF1, q, mF2)
@@ -132,6 +136,14 @@ def mu_q_coupled(basis, gJ, gI, J, I):
                                                    * wig6j(I, F2, J, F1, I, 1)
                                                    * np.sqrt(I * (I + 1) * (2 * I + 1)))
     return mu_q
+
+
+def mu_q_coupled(basis, gJ, gI, J, I):
+    """
+    Calculates the magnetic dipole matrix elements for a single basis (diagonal block).
+    Returns a (3, N, N) array in spherical basis (q = -1, 0, +1).
+    """
+    return mu_q_coupled_two_states(basis, basis, gJ, gI, J, I)
 
 
 

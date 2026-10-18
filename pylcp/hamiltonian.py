@@ -2,7 +2,7 @@ from __future__ import annotations
 import numpy as np
 
 from .util import spherical2cart
-from .typing import TransitionKey
+from .typing import TransitionKey, Vector3D
 
 
 # region blocks
@@ -66,6 +66,11 @@ class VectorBlock:
         """Adds self.matrix to the other matrix in position i,j"""
         other[:, i:i + self.n, j:j + self.m] += scale * self.matrix
 
+    def add_dagger_to_other_in_place(self, other, i, j, scale=1.):
+        """Adds conjugate transpose of self.matrix to other matrix in position j,i"""
+        for q in range(3):
+            other[q, j:j + self.m, i:i + self.n] += scale * np.conjugate(self.matrix[q].T)
+
 
 class MuQBlock(VectorBlock):
     def __init__(self, lower_label: str, upper_label: str, M: np.ndarray, muB: float):
@@ -109,7 +114,7 @@ class FullBlock:
 
     @property
     def is_diagonal(self) -> bool:
-        return self.n == self.m
+        return self.noffset == self.moffset
 
     @property
     def is_empty(self) -> bool:
@@ -216,6 +221,8 @@ class Hamiltonian:
         self.n = 0
         self.blocks_by_keys: dict[TransitionKey, FullBlock] = {}
         self.d_q_by_keys: dict[TransitionKey, DQBlock] = {}
+        self.d_q_bare: dict[TransitionKey, DQBlock] = {}
+        self.mu_bare: dict[TransitionKey, MuQBlock] = {}
         self.mass = mass
 
         if len(args) == 5:  # TODO: replace this with clear overloads
@@ -265,11 +272,11 @@ class Hamiltonian:
             raise ValueError("This state label is already used")
         self.ns.append(new_block.n)
         self.state_labels.append(state_label)
-        self.blocks.append([]) # add new column
+        self.blocks.append([])  # add new column
         moffset = 0
         # region fill in last column with new FullBlocks
         for i in range(self.block_count):
-            full_block = FullBlock(self.ns[i],new_block.n, moffset, self.n)
+            full_block = FullBlock(self.ns[i], new_block.n, moffset, self.n)
             self.blocks[i].append(full_block)
             self.blocks_by_keys[TransitionKey(self.state_labels[i], state_label)] = full_block
             moffset += self.ns[i]
@@ -365,7 +372,7 @@ class Hamiltonian:
         block.add_d_q(new_d_q)
         self.d_q_by_keys[new_d_q.key] = new_d_q
 
-    def make_full_matrices(self): # TODO: I think we're not using this anymore, so remove usages
+    def make_full_matrices(self):  # TODO: I think we're not using this anymore, so remove usages
         """
         Returns the full matrices that define the Hamiltonian.
 
@@ -378,67 +385,56 @@ class Hamiltonian:
         H_0 : array_like, shape (n, n)
             The diagonal portion of the Hamiltonian
         mu_q : array_like, shape (3, N, N)
-            The magnetic field dependent portion, in spherical basis.
-        d_q : dictionary of array_like, shape (3, N, N)
-            The electric field dependent portion, in spherical basis, arranged
-            by keys that describe the manifolds connected by the specific
-            :math:`d_q`.  This usually gets paired with :math:`E^*`
-        d_q_star : dictionary of array_like, shape (3, N, N)
-            The electric field dependent portion, in spherical basis, arranged
-            by keys that describe the manifolds connected by the specific
-            :math:`d_q`.  This usually gets paired with :math:`E`
+            The static intra-manifold magnetic field dependent portion, in spherical basis.
+        d_q_bare : dict[TransitionKey, DQBlock]
+            The electric dipole blocks by transition key.
+        mu_bare : dict[TransitionKey, MuQBlock]
+            The off-diagonal magnetic dipole blocks by transition key.
         """
         # Initialize the field-independent component of the Hamiltonian.
         self.H_0 = np.zeros((self.n, self.n), dtype='complex128')
         self.mu_q = np.zeros((3, self.n, self.n), dtype='complex128')
         self.d_q_bare = {}
-        self.d_q_star = {}
+        self.mu_bare = {}
 
         for key, fb in self.blocks_by_keys.items():
             r_sl, c_sl = fb.row_slice, fb.col_slice
             if fb.h_0 is not None:
                 self.H_0[r_sl, c_sl] += fb.h_0.matrix
             if fb.mu_q is not None:
-                self.mu_q[:, r_sl, c_sl] += fb.mu_q.matrix * fb.mu_q.muB
-                if not fb.is_diagonal:
-                    self.mu_q[:, c_sl, r_sl] += np.conjugate(np.swapaxes(fb.mu_q.matrix, -2, -1)) * fb.mu_q.muB
+                if fb.is_diagonal:
+                    fb.mu_q.add_to_other_in_place(self.mu_q, fb.noffset, fb.moffset, scale=fb.mu_q.muB)
+                else:
+                    self.mu_bare[key] = fb.mu_q
             if fb.d_q is not None:
-                bare = np.zeros((3, self.n, self.n), dtype='complex128')
-                star = np.zeros((3, self.n, self.n), dtype='complex128')
-                bare[:, r_sl, c_sl] = fb.d_q.matrix
-                for q in range(3):
-                    star[q] = np.conjugate(bare[q].T)
-                self.d_q_bare[key] = bare
-                self.d_q_star[key] = star
+                self.d_q_bare[key] = fb.d_q
 
         # Finally, put together the full d_q, irrespective of laser beam key:
         self.d_q = np.zeros((3, self.n, self.n), dtype='complex128')
-        for key in self.d_q_bare.keys():
-            self.d_q += self.d_q_bare[key] + self.d_q_star[key]
+        for key, d_q_block in self.d_q_bare.items():
+            fb = self.blocks_by_keys[key]
+            d_q_block.add_to_other_in_place(self.d_q, fb.noffset, fb.moffset)
+            d_q_block.add_dagger_to_other_in_place(self.d_q, fb.noffset, fb.moffset)
 
         # Make Cartesian coordinate copies.
         self.mu = spherical2cart(self.mu_q)
         self.d = spherical2cart(self.d_q)
 
-        return self.H_0, self.mu_q, self.d_q_bare, self.d_q_star
+        return self.H_0, self.mu_q, self.d_q_bare, self.mu_bare
 
-    def return_full_H(self, Eq, Bq):
+    def return_full_H(self, Bq=np.zeros(3), Eq: dict[TransitionKey, Vector3D] | None = None,
+                      B_rf: dict[TransitionKey, Vector3D] | None = None):
         """
         Assemble the block diagonal Hamiltonian into a single matrix
 
         Parameters
         ----------
-        Eq : array_like or dictionary of array_like
-            The electric field(s) driving transitions between manifolds,
-            each expressed in the spherical basis.  Each electric field
-            driving a transition between manifolds needs to specified with the
-            correct key in the dictionary.  For example, for a two-manifold
-            Hamiltonian with manifold labels `g` and `e`, the dictionary should
-            contain a single entry with `g->e`.  If the electric field is
-            given as a single array_like, it is assumed to drive the `g->e`
-            transition.
         Bq : array_like, shape (3,)
             The magnetic field in spherical basis.
+        Eq : dictionary of array_like
+            The electric field(s) driving transitions between manifolds.
+        B_rf : dictionary of array_like, optional
+            The RF/microwave oscillating magnetic field(s) driving magnetic transitions.
 
         Returns
         -------
@@ -450,13 +446,39 @@ class Hamiltonian:
 
         H = self.H_0 - np.tensordot(self.mu_q, np.conjugate(Bq), axes=(0, 0))
 
-        if isinstance(Eq, list) or isinstance(Eq, np.ndarray):
-            Eq = {TransitionKey('g', 'e'): Eq}  # Promote to a dictionary.
+        if Eq is not None:
+            if not isinstance(Eq, dict):
+                raise TypeError(
+                    f"Eq must be a dict[TransitionKey, np.ndarray], got {type(Eq).__name__}")
+            for key, val in Eq.items():
+                if not isinstance(key, TransitionKey):
+                    raise TypeError(
+                        f"Eq dictionary keys must be TransitionKey, got {type(key).__name__}: {key!r}")
+                if key in self.d_q_bare:
+                    block = self.d_q_bare[key]
+                    fb = self.blocks_by_keys[key]
+                    V_local = np.zeros((block.n, block.m), dtype='complex128')
+                    for ii, q in enumerate([-1.0, 0.0, 1.0]):
+                        V_local -= 0.5 * (-1.) ** q * block.matrix[ii] * val[2 - ii]
+                    H[fb.row_slice, fb.col_slice] += V_local
+                    H[fb.col_slice, fb.row_slice] += np.conjugate(V_local.T)
 
-        for key, val in Eq.items():
-            for ii, q in enumerate([-1.0, 0.0, 1.0]):
-                H -= (0.5 * (-1.) ** q * self.d_q_bare[key][ii] * val[2 - ii] +
-                      0.5 * (-1.) ** q * self.d_q_star[key][ii] * np.conjugate(val[2 - ii]))
+        if B_rf is not None:
+            if not isinstance(B_rf, dict):
+                raise TypeError(
+                    f"B_rf must be a dict[TransitionKey, np.ndarray], got {type(B_rf).__name__}")
+            for key, val in B_rf.items():
+                if not isinstance(key, TransitionKey):
+                    raise TypeError(
+                        f"B_rf dictionary keys must be TransitionKey, got {type(key).__name__}: {key!r}")
+                if key in self.mu_bare:
+                    block = self.mu_bare[key]
+                    fb = self.blocks_by_keys[key]
+                    V_local = np.zeros((block.n, block.m), dtype='complex128')
+                    for ii, q in enumerate([-1.0, 0.0, 1.0]):
+                        V_local -= 0.5 * (-1.) ** q * (block.matrix[ii] * block.muB) * val[2 - ii]
+                    H[fb.row_slice, fb.col_slice] += V_local
+                    H[fb.col_slice, fb.row_slice] += np.conjugate(V_local.T)
 
         return H
 

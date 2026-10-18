@@ -7,18 +7,18 @@ from os import PathLike
 from typing import TypeAlias, Callable
 
 import numpy as np
-from scipy.constants import c, h
+from scipy.constants import c, h, mu_0, physical_constants
 
 from .atom import State as Pylcp_state, Atom
 from pylcp.hamiltonian import Hamiltonian
 from pylcp.obe import OBE
 from pylcp.rateeq import RateEq
-from pylcp.fields import MagField, LaserBeams, InfinitePlaneWaveBeam
-from pylcp.atom.dataframe_internals import StateData, TransitionData, LaserTransitionGroup, \
-    LaserDisplayData, LaserFreqGroup, LaserData
-from pylcp.typing import HyperfineKey, HFTransitionKey, TransitionKey, Polarization, Vector3D
+from pylcp.fields import MagField, LaserBeams, InfinitePlaneWaveBeam, RFField
+from pylcp.atom.dataframe_internals import StateData, TransitionData, MagneticTransitionData, \
+    LaserTransitionGroup, LaserDisplayData, LaserFreqGroup, LaserData
+from pylcp.typing import HyperfineKey, HFTransitionKey, TransitionKey, Polarization, PolarizationEnum, Vector3D
 from pylcp.util import sort_float_then_string, hyperfine_correction, get_state_basis, \
-    mu_q_coupled, _d_q_matrix_element, add_conventional_MOT_laser_kvecs_and_pols
+    mu_q_coupled, mu_q_coupled_two_states, _d_q_matrix_element, add_conventional_MOT_laser_kvecs_and_pols
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -50,7 +50,9 @@ class DataFrame:
         self.gI = gI
         self.fine_states: dict[str, StateData] = {}
         self.transitions: dict[TransitionKey, TransitionData] = {}
+        self.magnetic_transitions: dict[HFTransitionKey, MagneticTransitionData] = {}
         self.lasers: dict[TransitionKey, LaserTransitionGroup] = {}
+        self.magnetic_lasers: dict[HFTransitionKey, LaserTransitionGroup] = {}
         self.laser_displays: dict[HFTransitionKey, dict[float, LaserDisplayData]] = {}
         self.magnetic_field: MagField = MagField(np.zeros(3))
 
@@ -135,6 +137,78 @@ class DataFrame:
         self.transitions[key] = TransitionData(gamma)
         self.lasers[key] = LaserTransitionGroup(key)
 
+    def add_magnetic_transition(
+        self,
+        label: str,
+        F1: float,
+        F2: float,
+        muB: float = 1.0,
+    ) -> HFTransitionKey:
+        """
+        Adds a magnetic dipole transition (RF / microwave) between two hyperfine manifolds.
+
+        :param label: state label (e.g. 'g')
+        :param F1: first hyperfine manifold quantum number
+        :param F2: second hyperfine manifold quantum number
+        :param muB: magnetic dipole coupling scale in units of Bohr magneton (default: 1.0)
+        :return: HFTransitionKey for the transition
+        """
+        key1 = HyperfineKey(label, F1)
+        key2 = HyperfineKey(label, F2)
+        hf_trans = HFTransitionKey(key1, key2)
+        self.magnetic_transitions[hf_trans] = MagneticTransitionData(muB=muB)
+        if hf_trans not in self.magnetic_lasers:
+            self.magnetic_lasers[hf_trans] = LaserTransitionGroup(hf_trans)
+        return hf_trans
+
+    def add_magnetic_laser(
+        self,
+        label: str,
+        F1: float,
+        F2: float,
+        delta: float,
+        kvec: np.ndarray,
+        pol: Polarization,
+        intensity: float,
+        delta_in_Gamma: bool = False,
+    ):
+        """
+        Adds a magnetic dipole (RF / microwave) laser beam coupling two hyperfine manifolds.
+
+        :param label: state label (e.g. 'g')
+        :param F1: first hyperfine manifold quantum number
+        :param F2: second hyperfine manifold quantum number
+        :param delta: laser detuning relative to the hyperfine transition frequency
+        :param kvec: wavevector
+        :param pol: polarization 3-vector
+        :param intensity: beam intensity normalized to I_sat,mag
+        :param delta_in_Gamma: if True, delta is specified in units of global Gamma_ref
+        """
+        key1 = HyperfineKey(label, F1)
+        key2 = HyperfineKey(label, F2)
+        hf_trans = HFTransitionKey(key1, key2)
+
+        if hf_trans not in self.magnetic_transitions:
+            self.add_magnetic_transition(label, F1, F2)
+
+        transition_energy = self.hf_energy(key2) - self.hf_energy(key1)
+        ref_gamma, _ = self._principal_gamma_and_energy()
+        if delta_in_Gamma:
+            delta = delta * ref_gamma
+        freq = transition_energy + delta
+
+        sat_intensity = self._saturation_intensity_mag()
+        si_intensity = float(intensity * sat_intensity)
+
+        trans_group = self.magnetic_lasers[hf_trans]
+        if freq in trans_group.freq_groups:
+            freq_group = trans_group.freq_groups[freq]
+        else:
+            freq_group = LaserFreqGroup(freq, hf_trans, [hf_trans])
+            trans_group.freq_groups[freq] = freq_group
+
+        freq_group.add_laser(LaserData(freq, np.asarray(kvec, dtype=float), pol, si_intensity))
+
     def add_laser(self, label1, label2, F1, F2, delta, kvec,
                   pol: Polarization, intensity, delta_in_Gamma=False):
         """
@@ -149,6 +223,8 @@ class DataFrame:
         :param delta_in_Gamma:
         :return:
         """
+        if label1 == label2:
+            raise ValueError("Electric dipole laser cannot have identical labels (label1 == label2).")
 
         key1, key2 = HyperfineKey(label1, F1), HyperfineKey(label2, F2)
         hf_transition = HFTransitionKey(key1, key2)
@@ -237,7 +313,9 @@ class DataFrame:
 
     def _has_custom_hyperfine_coupling(self) -> bool:
         """Returns True if any laser frequency group couples to a strict subset
-        of available active hyperfine transitions."""
+        of available active hyperfine transitions, or if magnetic transitions are present."""
+        if len(self.magnetic_transitions) > 0 or len(self.magnetic_lasers) > 0:
+            return True
         for fine_trans, laser_group in self.lasers.items():
             if fine_trans.lower not in self.fine_states or fine_trans.upper not in self.fine_states:
                 continue
@@ -405,6 +483,30 @@ class DataFrame:
                                       k=transition_energy / ref_gamma,
                                       gamma=transition_gamma / ref_gamma)
         # endregion
+        # region off-diagonal mu_q for magnetic transitions
+        for hf_trans, mag_data in self.magnetic_transitions.items():
+            key1, key2 = hf_trans.lower_key, hf_trans.upper_key
+            if key1 not in hf_bases or key2 not in hf_bases:
+                continue
+            b1_name, basis1 = hf_bases[key1]
+            b2_name, basis2 = hf_bases[key2]
+
+            idx1 = ham.state_labels.index(b1_name)
+            idx2 = ham.state_labels.index(b2_name)
+            if idx1 > idx2:
+                b1_name, b2_name = b2_name, b1_name
+                basis1, basis2 = basis2, basis1
+                key1, key2 = key2, key1
+
+            fine_state1 = self.fine_states[key1.label]
+            fine_state2 = self.fine_states[key2.label]
+            mu_q = mu_q_coupled_two_states(
+                basis1, basis2,
+                fine_state1.gJ, self.gI,
+                fine_state1.J, self.I
+            )
+            ham.add_mu_q_block(b1_name, b2_name, mu_q, muB=mag_data.muB)
+        # endregion
         # endregion
         return ham
 
@@ -435,8 +537,8 @@ class DataFrame:
                                                                delta / ref_gamma))
                 if beam_list:
                     lasers[fine_trans] = LaserBeams(beam_list)
-            return lasers
             # endregion
+            return lasers
 
         # region Hyperfine Block Mode (fallback)
         for fine_transition_laser_group in self.lasers.values():
@@ -446,16 +548,48 @@ class DataFrame:
                     hf_key1, hf_key2 = hf_transition
                     sat_intensity = self._saturation_intensity(hf_transition)
                     delta = (freq - np.abs(self.hf_energy(hf_key2) - self.hf_energy(hf_key1)))
-                    if hf_transition not in laser_lists:
-                        laser_lists[hf_transition] = []
-                    laser_list = laser_lists[hf_transition]
+                    tk = TransitionKey(str(hf_key1), str(hf_key2))
+                    if tk not in laser_lists:
+                        laser_lists[tk] = []
+                    laser_list = laser_lists[tk]
                     for laser_data in freq_group.lasers:
                         laser_list.append(InfinitePlaneWaveBeam(laser_data.kvec * freq / ref_energy,
                                                                 laser_data.pol,
                                                                 laser_data.intensity / sat_intensity,
                                                                 delta / ref_gamma))
-        for hf_transition in laser_lists:
-            lasers[str(hf_transition)] = LaserBeams(laser_lists[hf_transition])
+
+        sat_intensity_mag = self._saturation_intensity_mag()
+        for hf_trans, mag_laser_group in self.magnetic_lasers.items():
+            key1, key2 = hf_trans.lower_key, hf_trans.upper_key
+            b1_name = str(key1)
+            b2_name = str(key2)
+            if self.hf_energy(key1) <= self.hf_energy(key2):
+                tk = TransitionKey(b1_name, b2_name)
+            else:
+                tk = TransitionKey(b2_name, b1_name)
+
+            if tk not in laser_lists:
+                laser_lists[tk] = []
+            laser_list = laser_lists[tk]
+
+            energy_diff = np.abs(self.hf_energy(key2) - self.hf_energy(key1))
+            for freq_group in mag_laser_group.freq_groups.values():
+                freq = freq_group.freq
+                delta = freq - energy_diff
+                for laser_data in freq_group.lasers:
+                    s = laser_data.intensity / sat_intensity_mag
+                    k_dimless = (laser_data.kvec * freq / ref_energy
+                                 if np.linalg.norm(laser_data.kvec) > 0 else np.zeros(3))
+                    laser_list.append(RFField(
+                        kvec=k_dimless,
+                        pol=laser_data.pol,
+                        s=s,
+                        delta=delta / ref_gamma
+                    ))
+
+        for tk in laser_lists:
+            lasers[tk] = LaserBeams(laser_lists[tk])
+        # endregion
         return lasers
 
     def _principal_gamma_and_energy(self):
@@ -470,12 +604,26 @@ class DataFrame:
                 reference_gamma = transition_gamma
                 reference_energy = (self.fine_states[label_pair[1]].energy -
                                     self.fine_states[label_pair[0]].energy)
+        if reference_gamma == 0:
+            reference_gamma = 1.0
+        if reference_energy is None or reference_energy == 0:
+            reference_energy = 1.0
         return reference_gamma, reference_energy
 
     def _saturation_intensity(self, hf_transition: HFTransitionKey):
         fine_transition = hf_transition.to_transition()
         energy = np.abs(self.fine_states[fine_transition.lower].energy -
-                        self.fine_states[fine_transition.upper].energy)  # eV
+                        self.fine_states[fine_transition.upper].energy)
         gamma = self.transitions[fine_transition].gamma  # Hz
         return (2 * np.pi ** 2 * h * energy ** 3 * gamma) / (3 * c ** 2)
+
+    def _saturation_intensity_mag(self) -> float:
+        """
+        Calculates the magnetic saturation intensity I_sat,mag (in W/m^2)
+        corresponding to dimensionless s = 1 (B_0 = sqrt(2)):
+            I_sat,mag = (c * (h * gamma_ref)^2) / (mu_0 * mu_B^2)
+        """
+        ref_gamma, _ = self._principal_gamma_and_energy()
+        mu_B = physical_constants['Bohr magneton'][0]
+        return (c * (h * ref_gamma) ** 2) / (mu_0 * mu_B ** 2)
     # endregion

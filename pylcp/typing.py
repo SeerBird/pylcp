@@ -179,25 +179,20 @@ class CoordBasis(Enum):
 
 
 class PolarizationEnum(Enum):
-    """Enumeration of standard laser polarization states relative to beam k-vector."""
+    """Enumeration of standard circular laser polarization states relative to beam k-vector."""
     SIGMA_PLUS = 1
-    PI = 0
     SIGMA_MINUS = -1
 
-    def to_array(self)->np.ndarray:
+    def to_array(self) -> np.ndarray:
         """relative to the kvector"""
         if self.value == PolarizationEnum.SIGMA_PLUS.value:
             return np.array([0., 0., 1.], dtype='complex')
-        elif self.value == PolarizationEnum.PI.value:
-            return np.array([0., 1., 0.], dtype='complex')
         else:
             return np.array([1., 0., 0.], dtype='complex')
 
     def opposite(self):
         if self.value == PolarizationEnum.SIGMA_PLUS.value:
             return PolarizationEnum.SIGMA_MINUS
-        elif self.value == PolarizationEnum.PI.value:
-            return PolarizationEnum.PI
         else:
             return PolarizationEnum.SIGMA_PLUS
 
@@ -258,6 +253,10 @@ class OBEEvolutionMatrices:
     im_electric: dict[TransitionKey, Any] = field(default_factory=dict)
     d_q: dict[TransitionKey, Any] = field(default_factory=dict)
     d_q_conj: dict[TransitionKey, Any] = field(default_factory=dict)
+    re_mag_laser: dict[TransitionKey, Any] = field(default_factory=dict)
+    im_mag_laser: dict[TransitionKey, Any] = field(default_factory=dict)
+    mu_laser: dict[TransitionKey, Any] = field(default_factory=dict)
+    mu_laser_conj: dict[TransitionKey, Any] = field(default_factory=dict)
     magnetic: Any = field(default_factory=list)
 
     def __getitem__(self, key: Union[str, TransitionKey]) -> Any:
@@ -275,6 +274,13 @@ class OBEEvolutionMatrices:
             "d_q": self.d_q,
             "d_q*": self.d_q_conj,
             "d_q_conj": self.d_q_conj,
+            "reB_laser": self.re_mag_laser,
+            "re_mag_laser": self.re_mag_laser,
+            "imB_laser": self.im_mag_laser,
+            "im_mag_laser": self.im_mag_laser,
+            "mu_laser": self.mu_laser,
+            "mu_laser*": self.mu_laser_conj,
+            "mu_laser_conj": self.mu_laser_conj,
         }
         if key in mapping:
             return mapping[key]
@@ -297,6 +303,14 @@ class OBEEvolutionMatrices:
             self.d_q = value
         elif key in ("d_q*", "d_q_conj"):
             self.d_q_conj = value
+        elif key in ("reB_laser", "re_mag_laser"):
+            self.re_mag_laser = value
+        elif key in ("imB_laser", "im_mag_laser"):
+            self.im_mag_laser = value
+        elif key == "mu_laser":
+            self.mu_laser = value
+        elif key in ("mu_laser*", "mu_laser_conj"):
+            self.mu_laser_conj = value
         else:
             raise KeyError(f"Invalid key '{key}' for OBEEvolutionMatrices")
 
@@ -305,12 +319,17 @@ class OBEEvolutionMatrices:
             self.d_q = {}
         elif key in ("d_q*", "d_q_conj"):
             self.d_q_conj = {}
+        elif key == "mu_laser":
+            self.mu_laser = {}
+        elif key in ("mu_laser*", "mu_laser_conj"):
+            self.mu_laser_conj = {}
         else:
             raise KeyError(f"Cannot delete key '{key}' from OBEEvolutionMatrices")
 
     def __contains__(self, key: str) -> bool:
         valid_keys = {"decay", "H0", "h0", "static", "B", "magnetic", "reE", "re_electric", "imE",
-                      "im_electric", "d_q", "d_q*", "d_q_conj"}
+                      "im_electric", "d_q", "d_q*", "d_q_conj", "reB_laser", "re_mag_laser",
+                      "imB_laser", "im_mag_laser", "mu_laser", "mu_laser*", "mu_laser_conj"}
         return key in valid_keys
 
     def keys(self) -> list[str]:
@@ -323,6 +342,14 @@ class OBEEvolutionMatrices:
             keys_list.append("d_q")
         if self.d_q_conj:
             keys_list.append("d_q*")
+        if self.re_mag_laser:
+            keys_list.append("reB_laser")
+        if self.im_mag_laser:
+            keys_list.append("imB_laser")
+        if self.mu_laser:
+            keys_list.append("mu_laser")
+        if self.mu_laser_conj:
+            keys_list.append("mu_laser*")
         return keys_list
 
     def __iter__(self) -> Iterator[str]:

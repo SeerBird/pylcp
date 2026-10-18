@@ -388,19 +388,33 @@ class LaserBeam:
 
     def __init__(self, kvec, s, pol: Polarization, delta=0.,
                  phase=0., pol_coord: CoordBasis = CoordBasis.SPHERICAL, eps=1e-5):
+        if kvec is None:
+            kvec = np.zeros(3)
         self.kvec = VectorFieldParameter(kvec, "kvec")
         self.intensity = ScalarFieldParameter(s, "s")
 
         if isinstance(pol, PolarizationEnum):
-            k_hat = self.kvec() / np.linalg.norm(self.kvec())
+            norm_k = np.linalg.norm(self.kvec())
+            if norm_k == 0:
+                raise ValueError(
+                    "PolarizationEnum is defined relative to the k-vector and cannot be "
+                    "used for a beam with kvec = 0. Specify a vector polarization instead."
+                )
+            k_hat = self.kvec() / norm_k
             pol_arr = self.project_pol(k_hat, pol=pol.to_array(), invert=True).astype('complex128')
         elif isinstance(pol, (list, tuple, np.ndarray)):
             pol_arr = np.asarray(pol)
             if pol_coord == CoordBasis.CARTESIAN:
                 pol_arr = cart2spherical(pol_arr)
             pol_arr = pol_arr / np.linalg.norm(pol_arr)
-        else:
+        elif callable(pol):
             pol_arr = pol
+        else:
+            raise TypeError(
+                f"Unsupported polarization type: {type(pol).__name__}. "
+                "Scalar polarizations (+1, -1, etc.) are unsupported. "
+                "Use PolarizationEnum.SIGMA_PLUS / SIGMA_MINUS or a 3D polarization vector."
+            )
 
         self.pol = VectorFieldParameter(pol_arr, "polarization")
 
@@ -655,22 +669,9 @@ class LaserBeam:
 
         return psi, chi
 
-    def electric_field(self, R, t):
+    def field(self, R, t):
         """
-        The electric field at position R and t
-
-        Parameters
-        ----------
-        R : array_like, size (3,)
-            vector of the position at which to return the kvector.  By default,
-            the origin.
-        t : float
-            time at which to return the k-vector.  By default, t=0.
-
-        Returns
-        -------
-        Eq : array_like, shape (3,)
-            electric field in the spherical basis.
+        The oscillating field vector at position R and t in the spherical basis.
         """
         kvec = self.kvec(R, t)
         s = self.intensity(R, t)
@@ -694,41 +695,21 @@ class LaserBeam:
 
         return Eq
 
-    def electric_field_gradient(self, R, t):
+    def field_gradient(self, R, t):
         """
-        The full derivative of electric field at position R and t
-
-        Parameters
-        ----------
-        R : array_like, size (3,)
-            vector of the position at which to return the kvector.  By default,
-            the origin.
-        t : float
-            time at which to return the k-vector.  By default, t=0.
-
-        Returns
-        -------
-        dEq : array_like, shape (3, 3)
-            The full gradient of the electric field, in spherical coordinates.
-
-            .. math::
-              \\begin{pmatrix}
-                \\frac{dE_{-1}}{dx} & \\frac{dE_0}{dx} & \\frac{dE_{+1}}{dx} \\\\
-                \\frac{dE_{-1}}{dy} & \\frac{dE_0}{dy} & \\frac{dE_{+1}}{dy} \\\\
-                \\frac{dE_{-1}}{dz} & \\frac{dE_0}{dz} & \\frac{dE_{+1}}{dz} \\\\
-              \\end{pmatrix}
+        The full derivative of the oscillating field at position R and t.
         """
         (dx, dy, dz) = return_dx_dy_dz(R, self.eps)
         delEq = np.array([
-            (self.electric_field(R + dx, t) -
-             self.electric_field(R - dx, t)) / 2 / self.eps,
-            (self.electric_field(R + dy, t) -
-             self.electric_field(R - dy, t)) / 2 / self.eps,
-            (self.electric_field(R + dz, t) -
-             self.electric_field(R - dz, t)) / 2 / self.eps
+            (self.field(R + dx, t) -
+             self.field(R - dx, t)) / 2 / self.eps,
+            (self.field(R + dy, t) -
+             self.field(R - dy, t)) / 2 / self.eps,
+            (self.field(R + dz, t) -
+             self.field(R - dz, t)) / 2 / self.eps
         ])
-
         return delEq
+
 
 
 class InfinitePlaneWaveBeam(LaserBeam):
@@ -773,6 +754,9 @@ class InfinitePlaneWaveBeam(LaserBeam):
     """
 
     def __init__(self, kvec, pol: Polarization, s, delta, **kwargs):
+        # TODO: clear up kwargs
+        if kvec is None:
+            kvec = np.zeros(3)
         if callable(kvec):
             raise TypeError('kvec cannot be a function for an infinite plane wave.')
 
@@ -783,8 +767,7 @@ class InfinitePlaneWaveBeam(LaserBeam):
             raise TypeError('Polarization cannot be a function for an infinite plane wave.')
 
         # Use the super class to define the functions kvec, s, pol, and delta.
-        super().__init__(kvec=kvec, s=s, pol=pol, delta=delta,
-                         **kwargs)
+        super().__init__(kvec=kvec, s=s, pol=pol, delta=delta, **kwargs)
 
         # Save the constant values (might be useful):
         self.con_kvec = kvec
@@ -795,7 +778,7 @@ class InfinitePlaneWaveBeam(LaserBeam):
         self.dEq_prefactor = (-1j * self.amp * self.con_kvec.reshape(3, 1) *
                               self.con_pol.reshape(1, 3))
 
-    def electric_field_gradient(self, R, t):
+    def field_gradient(self, R, t):
         # With a plane wave, this is simple:
         delta_phase = self.delta_phase(t)
         phase = self.phase(t)
@@ -1078,84 +1061,30 @@ class LaserBeams(object):
         """
         return np.array([beam.delta(t) for beam in self.beam_vector])
 
-    def electric_field(self, R=np.array([0., 0., 0.]), t=0.):
+    def field(self, R=np.array([0., 0., 0.]), t=0.):
         """
-        Returns the electric field of the laser beams
-
-        Parameters
-        ----------
-        R : array_like, size (3,), optional
-            vector of the position at which to return the kvector.  By default,
-            the origin.
-        t : float, optional
-            time at which to return the k-vector.  By default, t=0.
-
-        Returns
-        -------
-        E : list of array_like, size(3,)
-            the electric field vectors at position R and time t for each laser beam.
+        Returns the oscillating field vectors of each beam at position R and time t.
         """
-        return np.array([beam.electric_field(R, t) for beam in self.beam_vector])
+        return np.array([beam.field(R, t) for beam in self.beam_vector])
 
-    def electric_field_gradient(self, R=np.array([0., 0., 0.]), t=0.):
+    def field_gradient(self, R=np.array([0., 0., 0.]), t=0.):
         """
-        Returns the gradient of the electric field of the laser beams
-
-        Parameters
-        ----------
-        R : array_like, size (3,), optional
-            vector of the position at which to return the kvector.  By default,
-            the origin.
-        t : float, optional
-            time at which to return the k-vector.  By default, t=0.
-
-        Returns
-        -------
-        dE : list of array_like, size(3,)
-            the electric field gradient matrices at position R and time t for each laser beam.
+        Returns the oscillating field gradient matrices of each beam at position R and time t.
         """
-        return np.array([beam.electric_field_gradient(R, t)
-                         for beam in self.beam_vector])
+        return np.array([beam.field_gradient(R, t) for beam in self.beam_vector])
 
-    def total_electric_field(self, R=np.array([0., 0., 0.]), t=0.):
+    def total_field(self, R=np.array([0., 0., 0.]), t=0.):
         """
-        Returns the total electric field of the laser beams
-
-        Parameters
-        ----------
-        R : array_like, size (3,), optional
-            vector of the position at which to return the kvector.  By default,
-            the origin.
-        t : float, optional
-            time at which to return the k-vector.  By default, t=0.
-
-        Returns
-        -------
-        E : array_like, size(3,)
-            the total electric field vector at position R and time t of all
-            the laser beams
+        Returns the total oscillating field vector of the laser beams at position R and time t.
         """
-        return np.sum(self.electric_field(R, t), axis=0)
+        return np.sum(self.field(R, t), axis=0)
 
-    def total_electric_field_gradient(self, R=np.array([0., 0., 0.]), t=0.):
+    def total_field_gradient(self, R=np.array([0., 0., 0.]), t=0.):
         """
-        Returns the total gradient of the electric field of the laser beams
-
-        Parameters
-        ----------
-        R : array_like, size (3,), optional
-            vector of the position at which to return the kvector.  By default,
-            the origin.
-        t : float, optional
-            time at which to return the k-vector.  By default, t=0.
-
-        Returns
-        -------
-        dE : array_like, size(3,)
-            the total electric field gradient matrices at position R and time t
-            of all laser beams.
+        Returns the total oscillating field gradient matrix of the laser beams at position R and time t.
         """
-        return np.sum(self.electric_field_gradient(R, t), axis=0)
+        return np.sum(self.field_gradient(R, t), axis=0)
+
 
     def project_pol(self, quant_axis, R=np.array([0., 0., 0.]), t=0, **kwargs):
         """
@@ -1355,3 +1284,78 @@ class Conventional3DMOTBeams(LaserBeams):
 
         for kvec, _pol in zip(kvecs, pols):
             self.add_laser(beam_type(kvec=rot_mat @ (k * kvec), pol=_pol, **kwargs))
+
+
+class RFField(LaserBeam):
+    """
+    Radio-frequency (RF) or microwave magnetic field coupling to magnetic dipole transitions.
+
+    Parameters
+    ----------
+    kvec : array_like with shape (3,) or callable, optional
+        Wavevector of the RF field. Defaults to [0., 0., 0.] (infinite wavelength limit).
+    pol : array_like with shape (3,) or callable, optional
+        Polarization of the RF magnetic field specified as a 3D vector.
+        Defaults to [0., 0., 1.] in CARTESIAN basis (oscillating field along z,
+        driving Delta m = 0 transitions). PolarizationEnum is disallowed.
+    s : float or callable, optional
+        Intensity / saturation parameter. If provided and B0 is not, B0 = sqrt(2 * s).
+    delta : float or callable, optional
+        Detuning of the RF field. Default: 0.0.
+    B0 : float or callable, optional
+        Magnetic field amplitude. If provided, s = B0**2 / 2.
+    phase : float or callable, optional
+        Phase of the RF field. Default: 0.0.
+    pol_coord : CoordBasis, optional
+        Coordinate basis for vector polarization (CARTESIAN or SPHERICAL). Default: CARTESIAN.
+    eps : float, optional
+        Small distance for finite difference derivatives. Default: 1e-5.
+    """
+
+    def __init__(self, kvec=None, pol: Polarization = np.array([0.0, 0.0, 1.0]),
+                 s: float | None = None, delta=0., B0: float | None = None,
+                 phase=0., pol_coord: CoordBasis = CoordBasis.CARTESIAN,
+                 eps=1e-5, **kwargs):
+        if kvec is None:
+            kvec = np.zeros(3)
+
+        if isinstance(pol, PolarizationEnum):
+            raise TypeError(
+                "PolarizationEnum is only defined relative to a laser beam's k-vector and cannot "
+                "be used for RF fields. Specify polarization as a 3D vector (e.g. [0, 0, 1] for "
+                "z-polarization in CARTESIAN basis, or [0, 1, 0] in SPHERICAL basis)."
+            )
+
+        # Amplitude handling: B0 or s
+        if B0 is not None:
+            if callable(B0):
+                s_val = lambda R=np.zeros(3), t=0: (B0(R, t) ** 2) / 2.0
+            else:
+                s_val = (float(B0) ** 2) / 2.0
+        elif s is not None:
+            s_val = s
+        else:
+            s_val = 1.0
+
+        if isinstance(pol, (list, tuple, np.ndarray)):
+            pol_arr = np.asarray(pol, dtype='complex128')
+            if pol_coord == CoordBasis.CARTESIAN:
+                pol_arr = cart2spherical(pol_arr)
+            norm = np.linalg.norm(pol_arr)
+            if norm > 0:
+                pol_arr = pol_arr / norm
+        else:
+            pol_arr = pol
+
+        super().__init__(kvec=kvec, s=s_val, pol=pol_arr, delta=delta,
+                         phase=phase, pol_coord=CoordBasis.SPHERICAL, eps=eps)
+
+        if B0 is not None:
+            self.B0 = ScalarFieldParameter(B0, "B0")
+        else:
+            self.B0 = ScalarFieldParameter(
+                lambda R=np.zeros(3), t=0: np.sqrt(2.0 * self.intensity(R, t)), "B0"
+            )
+
+
+

@@ -195,6 +195,9 @@ class OBE(GoverningEq):
         d_q_ev, d_q_star_ev = self.__build_coherent_ev_for_dq()
         self.ev_mat.d_q = d_q_ev
         self.ev_mat.d_q_conj = d_q_star_ev
+        mu_laser_ev, mu_laser_star_ev = self.__build_coherent_ev_for_mag_laser()
+        self.ev_mat.mu_laser = mu_laser_ev
+        self.ev_mat.mu_laser_conj = mu_laser_star_ev
         self.ev_mat.static = self.ev_mat.decay + self.ev_mat.h0
 
         # If necessary, transform the evolution matrices:
@@ -227,50 +230,31 @@ class OBE(GoverningEq):
     def __build_coherent_ev_for_mu(self) -> np.ndarray:
         n2 = self.hamiltonian.n ** 2
         mag_ev = np.zeros((3, n2, n2), dtype='complex128')
-        for key, fb in self.hamiltonian.blocks_by_keys.items():
+        for label in self.hamiltonian.state_labels:
+            key = TransitionKey(label, label)
+            fb = self.hamiltonian.blocks_by_keys[key]
             if fb.mu_q is None:
                 continue
-            A, B = key
 
             for q in range(3):
-                M_AB = fb.mu_q.matrix[q] * fb.mu_q.muB
-                if A == B:
-                    for C in self.hamiltonian.state_labels:
-                        c_slice = self.hamiltonian.get_state_slice(C)
-                        N_C = c_slice.stop - c_slice.start
-                        In_C = np.eye(N_C, dtype='complex128')
+                M_AA = fb.mu_q.matrix[q] * fb.mu_q.muB
+                for C in self.hamiltonian.state_labels:
+                    c_slice = self.hamiltonian.get_state_slice(C)
+                    N_C = c_slice.stop - c_slice.start
+                    In_C = np.eye(N_C, dtype='complex128')
 
-                        idx_AC = self.__get_vec_indices_for_labels(A, C)
-                        mag_ev[q][np.ix_(idx_AC, idx_AC)] -= 1j * np.kron(In_C, M_AB)
+                    idx_AC = self.__get_vec_indices_for_labels(label, C)
+                    mag_ev[q][np.ix_(idx_AC, idx_AC)] -= 1j * np.kron(In_C, M_AA)
 
-                        idx_CA = self.__get_vec_indices_for_labels(C, A)
-                        mag_ev[q][np.ix_(idx_CA, idx_CA)] += 1j * np.kron(M_AB.T, In_C)
-                else:
-                    M_BA = np.conjugate(M_AB.T)
-                    for C in self.hamiltonian.state_labels:
-                        c_slice = self.hamiltonian.get_state_slice(C)
-                        N_C = c_slice.stop - c_slice.start
-                        In_C = np.eye(N_C, dtype='complex128')
-
-                        # M_AB action
-                        idx_AC = self.__get_vec_indices_for_labels(A, C)
-                        idx_BC = self.__get_vec_indices_for_labels(B, C)
-                        mag_ev[q][np.ix_(idx_AC, idx_BC)] -= 1j * np.kron(In_C, M_AB)
-
-                        idx_CB = self.__get_vec_indices_for_labels(C, B)
-                        idx_CA = self.__get_vec_indices_for_labels(C, A)
-                        mag_ev[q][np.ix_(idx_CB, idx_CA)] += 1j * np.kron(M_AB.T, In_C)
-
-                        # M_BA action
-                        mag_ev[q][np.ix_(idx_BC, idx_AC)] -= 1j * np.kron(In_C, M_BA)
-                        mag_ev[q][np.ix_(idx_CA, idx_CB)] += 1j * np.kron(M_BA.T, In_C)
+                    idx_CA = self.__get_vec_indices_for_labels(C, label)
+                    mag_ev[q][np.ix_(idx_CA, idx_CA)] += 1j * np.kron(M_AA.T, In_C)
         return mag_ev
 
     def __build_coherent_ev_for_dq(self) -> tuple[dict, dict]:
         n2 = self.hamiltonian.n ** 2
         d_q_ev = {}
         d_q_star_ev = {}
-        for key in self.laserBeams.keys():
+        for key in self.electric_lasers.keys():
             fb = self.hamiltonian.blocks_by_keys[key]
             if fb.d_q is None:
                 continue
@@ -300,6 +284,41 @@ class OBE(GoverningEq):
                     d_q_star_ev[key][q][np.ix_(idx_Cg, idx_Ce)] += 1j * np.kron(M_eg.T, In_C)
 
         return d_q_ev, d_q_star_ev
+
+    def __build_coherent_ev_for_mag_laser(self) -> tuple[dict, dict]:
+        n2 = self.hamiltonian.n ** 2
+        mu_q_ev = {}
+        mu_q_star_ev = {}
+        for key in self.magnetic_lasers.keys():
+            fb = self.hamiltonian.blocks_by_keys[key]
+            if fb.mu_q is None:
+                continue
+            muB = fb.mu_q.muB
+            lower_label, upper_label = key
+            mu_q_ev[key] = np.zeros((3, n2, n2), dtype='complex128')
+            mu_q_star_ev[key] = np.zeros((3, n2, n2), dtype='complex128')
+
+            for q in range(3):
+                M_AB = (muB / 4.0) * fb.mu_q.matrix[q]
+                M_BA = np.conjugate(M_AB.T)
+
+                for C in self.hamiltonian.state_labels:
+                    c_slice = self.hamiltonian.get_state_slice(C)
+                    N_C = c_slice.stop - c_slice.start
+                    In_C = np.eye(N_C, dtype='complex128')
+
+                    idx_AC = self.__get_vec_indices_for_labels(lower_label, C)
+                    idx_BC = self.__get_vec_indices_for_labels(upper_label, C)
+                    mu_q_ev[key][q][np.ix_(idx_AC, idx_BC)] -= 1j * np.kron(In_C, M_AB)
+
+                    idx_CB = self.__get_vec_indices_for_labels(C, upper_label)
+                    idx_CA = self.__get_vec_indices_for_labels(C, lower_label)
+                    mu_q_ev[key][q][np.ix_(idx_CB, idx_CA)] += 1j * np.kron(M_AB.T, In_C)
+
+                    mu_q_star_ev[key][q][np.ix_(idx_BC, idx_AC)] -= 1j * np.kron(In_C, M_BA)
+                    mu_q_star_ev[key][q][np.ix_(idx_CA, idx_CB)] += 1j * np.kron(M_BA.T, In_C)
+
+        return mu_q_ev, mu_q_star_ev
 
     def _build_decay_ev(self):
         """
@@ -430,6 +449,16 @@ class OBE(GoverningEq):
                 1j * (self.ev_mat['d_q'][key][jj] - self.ev_mat['d_q*'][key][jj])
             ) for jj in range(3)])
 
+        self.ev_mat['reB_laser'] = {}
+        self.ev_mat['imB_laser'] = {}
+        for key in self.ev_mat['mu_laser'].keys():
+            self.ev_mat['reB_laser'][key] = np.array([self.__transform_ev_matrix(
+                self.ev_mat['mu_laser'][key][jj] + self.ev_mat['mu_laser*'][key][jj]
+            ) for jj in range(3)])
+            self.ev_mat['imB_laser'][key] = np.array([self.__transform_ev_matrix(
+                1j * (self.ev_mat['mu_laser'][key][jj] - self.ev_mat['mu_laser*'][key][jj])
+            ) for jj in range(3)])
+
         # Transform Bq back into Bx, By, and Bz (making it real):
         self.ev_mat['B'] = spherical2cart(self.ev_mat['B'])
 
@@ -439,6 +468,8 @@ class OBE(GoverningEq):
 
         del self.ev_mat['d_q']
         del self.ev_mat['d_q*']
+        del self.ev_mat['mu_laser']
+        del self.ev_mat['mu_laser*']
 
     def __convert_to_sparse(self):
         def convert_based_on_shape(matrix):
@@ -596,13 +627,17 @@ class OBE(GoverningEq):
             Evolution matrix for the densities
         """
         Eq = {}
-        for key in self.laserBeams.keys():
-            Eq[key] = self.laserBeams[key].total_electric_field(r, t)
+        for key, beams in self.electric_lasers.items():
+            Eq[key] = beams.total_field(r, t)
+
+        B_rf = {}
+        for key, beams in self.magnetic_lasers.items():
+            B_rf[key] = beams.total_field(r, t)
 
         B = self.magField.Field(r, t)
         Bq = cart2spherical(B)
 
-        H = self.hamiltonian.return_full_H(Bq, Eq)
+        H = self.hamiltonian.return_full_H(Bq, Eq, B_rf=B_rf)
         ev_mat = self.__build_coherent_ev_submatrix(H)
 
         if self.transform_into_re_im:
@@ -635,30 +670,45 @@ class OBE(GoverningEq):
         ev_mat = self.ev_mat.static.copy()
 
         # Add in electric fields:
-        for key in self.laserBeams.keys():
+        for key, beams in self.electric_lasers.items():
             if self.transform_into_re_im:
-                Eq = self.laserBeams[key].total_electric_field(r, t)
+                Eq = beams.total_field(r, t)
                 for ii in range(3):
                     if np.abs(Eq[ii]) > 1e-10:
                         ev_mat -= np.real(Eq[ii]) * self.ev_mat['reE'][key][ii]
                         ev_mat -= np.imag(Eq[ii]) * self.ev_mat['imE'][key][ii]
             else:
-                Eq = self.laserBeams[key].total_electric_field(np.real(r), t)
+                Eq = beams.total_field(np.real(r), t)
                 for ii in range(3):
                     if np.abs(Eq[ii]) > 1e-10:
                         ev_mat -= np.conjugate(Eq[ii]) * self.ev_mat['d_q'][key][ii]
                         ev_mat -= Eq[ii] * self.ev_mat['d_q*'][key][ii]
 
+        # Add in magnetic fields from magnetic lasers:
+        for key, beams in self.magnetic_lasers.items():
+            if self.transform_into_re_im:
+                B_rf = beams.total_field(r, t)
+                for ii in range(3):
+                    if np.abs(B_rf[ii]) > 1e-10:
+                        ev_mat -= np.real(B_rf[ii]) * self.ev_mat['reB_laser'][key][ii]
+                        ev_mat -= np.imag(B_rf[ii]) * self.ev_mat['imB_laser'][key][ii]
+            else:
+                B_rf = beams.total_field(np.real(r), t)
+                for ii in range(3):
+                    if np.abs(B_rf[ii]) > 1e-10:
+                        ev_mat -= np.conjugate(B_rf[ii]) * self.ev_mat['mu_laser'][key][ii]
+                        ev_mat -= B_rf[ii] * self.ev_mat['mu_laser*'][key][ii]
+
         # Add in magnetic fields:
         B = self.magField.Field(r, t)
         for ii, q in enumerate(range(-1, 2)):
             if self.transform_into_re_im:
-                if np.abs(Bq[ii]) > 1e-10:
-                    drhodt -= self.ev_mat['B'][ii] * B[ii] @ rho
+                if np.abs(B[ii]) > 1e-10:
+                    ev_mat -= self.ev_mat['B'][ii] * B[ii]
             else:
                 Bq = cart2spherical(B)
-                if np.abs(Bq[2 - ii]) > 1e-10:
-                    drhodt -= (-1) ** np.abs(q) * self.ev_mat['B'][ii] * Bq[2 - ii] @ rho
+                if np.abs(Bq[ii]) > 1e-10:
+                    ev_mat -= self.ev_mat['B'][ii] * np.conjugate(Bq[ii])
 
         return ev_mat
 
@@ -672,9 +722,9 @@ class OBE(GoverningEq):
         drhodt = self.ev_mat.static @ rho
 
         # Add in electric fields:
-        for key in self.laserBeams.keys():
+        for key, beams in self.electric_lasers.items():
             if self.transform_into_re_im:
-                Eq = self.laserBeams[key].total_electric_field(r, t)
+                Eq = beams.total_field(r, t)
                 for ii, q in enumerate([-1.0, 0.0, 1.0]):
                     if np.abs(Eq[2 - ii]) > 1e-10:
                         drhodt -= ((-1.) ** q * np.real(Eq[2 - ii]) *
@@ -682,13 +732,32 @@ class OBE(GoverningEq):
                         drhodt -= ((-1.) ** q * np.imag(Eq[2 - ii]) *
                                    (self.ev_mat['imE'][key][ii] @ rho))
             else:
-                Eq = self.laserBeams[key].total_electric_field(np.real(r), t)
+                Eq = beams.total_field(np.real(r), t)
                 for ii, q in enumerate([-1.0, 0.0, 1.0]):
                     if np.abs(Eq[2 - ii]) > 1e-10:
                         drhodt -= ((-1.) ** q * Eq[2 - ii] *
                                    (self.ev_mat['d_q'][key][ii] @ rho))
                         drhodt -= ((-1.) ** q * np.conjugate(Eq[2 - ii]) *
                                    (self.ev_mat['d_q*'][key][ii] @ rho))
+
+        # Add in magnetic fields from magnetic lasers:
+        for key, beams in self.magnetic_lasers.items():
+            if self.transform_into_re_im:
+                B_rf = beams.total_field(r, t)
+                for ii, q in enumerate([-1.0, 0.0, 1.0]):
+                    if np.abs(B_rf[2 - ii]) > 1e-10:
+                        drhodt -= ((-1.) ** q * np.real(B_rf[2 - ii]) *
+                                   (self.ev_mat['reB_laser'][key][ii] @ rho))
+                        drhodt -= ((-1.) ** q * np.imag(B_rf[2 - ii]) *
+                                   (self.ev_mat['imB_laser'][key][ii] @ rho))
+            else:
+                B_rf = beams.total_field(np.real(r), t)
+                for ii, q in enumerate([-1.0, 0.0, 1.0]):
+                    if np.abs(B_rf[2 - ii]) > 1e-10:
+                        drhodt -= ((-1.) ** q * B_rf[2 - ii] *
+                                   (self.ev_mat['mu_laser'][key][ii] @ rho))
+                        drhodt -= ((-1.) ** q * np.conjugate(B_rf[2 - ii]) *
+                                   (self.ev_mat['mu_laser*'][key][ii] @ rho))
 
         # Add in magnetic fields:
         B = self.magField.Field(r, t)
@@ -990,14 +1059,16 @@ class OBE(GoverningEq):
             f_laser_q = {}
             f_laser = {}
 
-        for key in self.laserBeams:
+        for key, beams in self.electric_lasers.items():
             # First, determine the average mu_q:
             # This returns a (3,) + rho.shape[2:] array
-            mu_q_av = self.observable(self.hamiltonian.d_q_bare[key], rho)
-            gamma = self.hamiltonian.blocks_by_keys[key].d_q.gamma
+            fb = self.hamiltonian.blocks_by_keys[key]
+            d_q_full = fb.d_q.return_block_in_place(fb.noffset, fb.moffset, self.hamiltonian.n)
+            mu_q_av = self.observable(d_q_full, rho)
+            gamma = fb.d_q.gamma
 
             if not return_details:
-                delE = self.laserBeams[key].total_electric_field_gradient(np.real(r), t)
+                delE = beams.total_field_gradient(np.real(r), t)
 
                 # We are just looking at the d_q, whereas the full observable
                 # is \nabla (d_q \cdot E^\dagger) + (d_q^* E)) =
@@ -1008,17 +1079,17 @@ class OBE(GoverningEq):
                 for jj, q in enumerate(np.arange(-1., 2., 1.)):
                     f += np.real((-1) ** q * gamma * mu_q_av[jj] * delE[:, 2 - jj]) / 2
             else:
-                f_laser_q[key] = np.zeros((3, 3, self.laserBeams[key].num_of_beams)
+                f_laser_q[key] = np.zeros((3, 3, beams.num_of_beams)
                                           + rho.shape[2:])
-                f_laser[key] = np.zeros((3, self.laserBeams[key].num_of_beams)
+                f_laser[key] = np.zeros((3, beams.num_of_beams)
                                         + rho.shape[2:])
 
                 # Now, dot it into each laser beam:
-                for ii, beam in enumerate(self.laserBeams[key].beam_vector):
+                for ii, beam in enumerate(beams.beam_vector):
                     if not self.transform_into_re_im:
-                        delE = beam.electric_field_gradient(np.real(r), t)
+                        delE = beam.field_gradient(np.real(r), t)
                     else:
-                        delE = beam.electric_field_gradient(r, t)
+                        delE = beam.field_gradient(r, t)
 
                     for jj, q in enumerate(np.arange(-1., 2., 1.)):
                         f_laser_q[key][:, jj, ii] += \

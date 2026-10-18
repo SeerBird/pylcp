@@ -23,11 +23,11 @@ def create_two_level_system(include_off_diagonal_mu=False):
     if include_off_diagonal_mu:
         mu_ge = np.random.randn(3, 1, 3) + 1j * np.random.randn(3, 1, 3)
         ham.add_mu_q_block('g', 'e', mu_ge, muB=1.0)
-
-    ham.add_d_q_block('g', 'e', d_q, gamma=1.5, k=1.0)
-
-    beam = LaserBeam(kvec=np.array([0, 0, 1]), pol=np.array([0, 0, 1]), s=1.0, delta=0.0)
-    laser_beams = {TransitionKey('g', 'e'): LaserBeams([beam])}
+        laser_beams = {}
+    else:
+        ham.add_d_q_block('g', 'e', d_q, gamma=1.5, k=1.0)
+        beam = LaserBeam(kvec=np.array([0, 0, 1]), pol=np.array([0, 0, 1]), s=1.0, delta=0.0)
+        laser_beams = {TransitionKey('g', 'e'): LaserBeams([beam])}
     mag_field = MagField(lambda r, t: np.array([0.0, 0.0, 1.0]))
 
     return ham, laser_beams, mag_field
@@ -66,14 +66,11 @@ def test_block_coherent_builder_magnetic_off_diagonal():
 
     fb_g = ham.blocks_by_keys[TransitionKey('g', 'g')]
     fb_e = ham.blocks_by_keys[TransitionKey('e', 'e')]
-    fb_ge = ham.blocks_by_keys[TransitionKey('g', 'e')]
 
     for q in range(3):
         H_mu = np.zeros((ham.n, ham.n), dtype='complex128')
         H_mu[g_slice, g_slice] = fb_g.mu_q.matrix[q] * fb_g.mu_q.muB
         H_mu[e_slice, e_slice] = fb_e.mu_q.matrix[q] * fb_e.mu_q.muB
-        H_mu[g_slice, e_slice] = fb_ge.mu_q.matrix[q] * fb_ge.mu_q.muB
-        H_mu[e_slice, g_slice] = np.conjugate(fb_ge.mu_q.matrix[q].T) * fb_ge.mu_q.muB
 
         baseline_mu = 1j * (np.kron(H_mu.T, In) - np.kron(In, H_mu))
         assert np.allclose(obe.ev_mat.magnetic[q], baseline_mu, atol=1e-12)
@@ -87,13 +84,16 @@ def test_block_coherent_builder_dq():
     In = np.eye(ham.n, dtype='complex128')
     key = TransitionKey('g', 'e')
     gamma = ham.blocks_by_keys[key].d_q.gamma
+    fb = ham.blocks_by_keys[key]
+    d_q_bare_full = ham.d_q_bare[key].return_block_in_place(fb.noffset, fb.moffset, ham.n)
+    d_q_star_full = np.conjugate(np.swapaxes(d_q_bare_full, 1, 2))
 
     for q in range(3):
-        M_bare_full = gamma * ham.d_q_bare[key][q] / 4.0
+        M_bare_full = gamma * d_q_bare_full[q] / 4.0
         baseline_dq = 1j * (np.kron(M_bare_full.T, In) - np.kron(In, M_bare_full))
         assert np.allclose(obe.ev_mat.d_q[key][q], baseline_dq, atol=1e-12)
 
-        M_star_full = gamma * ham.d_q_star[key][q] / 4.0
+        M_star_full = gamma * d_q_star_full[q] / 4.0
         baseline_dq_star = 1j * (np.kron(M_star_full.T, In) - np.kron(In, M_star_full))
         assert np.allclose(obe.ev_mat.d_q_conj[key][q], baseline_dq_star, atol=1e-12)
 
@@ -104,8 +104,9 @@ def reference_decay_builder(ham):
     ev_mat = np.zeros((n2, n2), dtype='complex128')
     for key in ham.d_q_bare:
         gamma = ham.blocks_by_keys[key].d_q.gamma
-        d_q_bare = ham.d_q_bare[key]
-        d_q_star = ham.d_q_star[key]
+        fb = ham.blocks_by_keys[key]
+        d_q_bare = ham.d_q_bare[key].return_block_in_place(fb.noffset, fb.moffset, ham.n)
+        d_q_star = np.conjugate(np.swapaxes(d_q_bare, 1, 2))
         for ii in range(ham.n):
             for jj in range(ham.n):
                 for kk in range(ham.n):
