@@ -1077,12 +1077,16 @@ class LaserBeams(object):
         """
         Returns the total oscillating field vector of the laser beams at position R and time t.
         """
+        if len(self.beam_vector) == 0:
+            return np.zeros(3, dtype=complex)
         return np.sum(self.field(R, t), axis=0)
 
     def total_field_gradient(self, R=np.array([0., 0., 0.]), t=0.):
         """
         Returns the total oscillating field gradient matrix of the laser beams at position R and time t.
         """
+        if len(self.beam_vector) == 0:
+            return np.zeros((3, 3), dtype=complex)
         return np.sum(self.field_gradient(R, t), axis=0)
 
 

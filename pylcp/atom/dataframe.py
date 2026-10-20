@@ -16,9 +16,11 @@ from pylcp.rateeq import RateEq
 from pylcp.fields import MagField, LaserBeams, InfinitePlaneWaveBeam, RFField
 from pylcp.atom.dataframe_internals import StateData, TransitionData, MagneticTransitionData, \
     LaserTransitionGroup, LaserDisplayData, LaserFreqGroup, LaserData
-from pylcp.typing import HyperfineKey, HFTransitionKey, TransitionKey, Polarization, PolarizationEnum, Vector3D
+from pylcp.typing import HyperfineKey, HFTransitionKey, TransitionKey, Polarization, \
+    PolarizationEnum, Vector3D
 from pylcp.util import sort_float_then_string, hyperfine_correction, get_state_basis, \
-    mu_q_coupled, mu_q_coupled_two_states, _d_q_matrix_element, add_conventional_MOT_laser_kvecs_and_pols
+    mu_q_coupled, mu_q_coupled_two_states, _d_q_matrix_element, \
+    add_conventional_MOT_laser_kvecs_and_pols
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -138,11 +140,11 @@ class DataFrame:
         self.lasers[key] = LaserTransitionGroup(key)
 
     def add_magnetic_transition(
-        self,
-        label: str,
-        F1: float,
-        F2: float,
-        muB: float = 1.0,
+            self,
+            label: str,
+            F1: float,
+            F2: float,
+            muB: float = 1.0,
     ) -> HFTransitionKey:
         """
         Adds a magnetic dipole transition (RF / microwave) between two hyperfine manifolds.
@@ -162,15 +164,15 @@ class DataFrame:
         return hf_trans
 
     def add_magnetic_laser(
-        self,
-        label: str,
-        F1: float,
-        F2: float,
-        delta: float,
-        kvec: np.ndarray,
-        pol: Polarization,
-        intensity: float,
-        delta_in_Gamma: bool = False,
+            self,
+            label: str,
+            F1: float,
+            F2: float,
+            delta: float,
+            kvec: np.ndarray,
+            pol: Polarization,
+            intensity: float,
+            delta_in_Gamma: bool = False,
     ):
         """
         Adds a magnetic dipole (RF / microwave) laser beam coupling two hyperfine manifolds.
@@ -223,8 +225,11 @@ class DataFrame:
         :param delta_in_Gamma:
         :return:
         """
+        # TODO: make this only include the specified (label1,F1->label2,F2) transition in
+        #  enabled_transitions
         if label1 == label2:
-            raise ValueError("Electric dipole laser cannot have identical labels (label1 == label2).")
+            raise ValueError(
+                "Electric dipole laser cannot have identical labels (label1 == label2).")
 
         key1, key2 = HyperfineKey(label1, F1), HyperfineKey(label2, F2)
         hf_transition = HFTransitionKey(key1, key2)
@@ -252,9 +257,23 @@ class DataFrame:
 
             freq_group = LaserFreqGroup(freq, fine_transition, enabled_transitions)
             transition_group.freq_groups[freq] = freq_group
+        laser_data = LaserData(freq, kvec, pol, intensity
+                               * self._saturation_intensity(hf_transition))
+        freq_group.add_laser(laser_data)
+        return laser_data
 
-        freq_group.add_laser(LaserData(freq, kvec, pol, intensity
-                                       * self._saturation_intensity(hf_transition)))
+    def add_laser_on_single_transition(self, label1, label2, F1, F2, delta, kvec,
+                                       pol: Polarization, intensity, delta_in_Gamma=False):
+        hf_transition = HFTransitionKey(HyperfineKey(label1, F1),
+                                        HyperfineKey(label2, F2))
+        laser_data = self.add_laser(label1, label2, F1, F2, delta,
+                                    kvec, pol, intensity, delta_in_Gamma)
+        # TODO: check if there's already a laser in this freq_group,
+        #  figure out how this should actually work
+        self.lasers[TransitionKey(label1, label2)].freq_groups[
+            laser_data.freq].enable_single_transition(
+            hf_transition)
+        return laser_data
 
     def add_conventional_MOT_lasers(self, label1, label2, F1, F2,
                                     delta, intensity, delta_in_Gamma=False):
@@ -587,8 +606,9 @@ class DataFrame:
                         delta=delta / ref_gamma
                     ))
 
-        for tk in laser_lists:
-            lasers[tk] = LaserBeams(laser_lists[tk])
+        for tk, beam_list in laser_lists.items():
+            if len(beam_list) > 0:
+                lasers[tk] = LaserBeams(beam_list)
         # endregion
         return lasers
 

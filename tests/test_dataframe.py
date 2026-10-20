@@ -175,3 +175,42 @@ class TestDataFrameHamiltonianAndLasers:
         finally:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
+
+    def test_laser_freq_group_transition_toggles(self):
+        """Test enable_transition, disable_transition, and enable_single_transition methods on LaserFreqGroup."""
+        from pylcp.atom.dataframe_internals import LaserFreqGroup
+        from pylcp.typing import HyperfineKey, HFTransitionKey, TransitionKey
+
+        t_key = TransitionKey("g", "e2")
+        hft1 = HFTransitionKey(HyperfineKey("g", 1), HyperfineKey("e2", 2))
+        hft2 = HFTransitionKey(HyperfineKey("g", 2), HyperfineKey("e2", 2))
+        hft3 = HFTransitionKey(HyperfineKey("g", 1), HyperfineKey("e2", 1))
+
+        fg = LaserFreqGroup(freq=1e14, transition=t_key, enabled_transitions=[hft1, hft2])
+        assert len(fg.enabled_transitions) == 2
+        assert hft1 in fg.enabled_transitions
+        assert hft2 in fg.enabled_transitions
+
+        # disable_transition
+        fg.disable_transition(hft1)
+        assert len(fg.enabled_transitions) == 1
+        assert hft1 not in fg.enabled_transitions
+        assert hft2 in fg.enabled_transitions
+
+        # disable non-existent transition (no-op, no error)
+        fg.disable_transition(hft1)
+        assert len(fg.enabled_transitions) == 1
+
+        # enable_transition
+        fg.enable_transition(hft3)
+        assert len(fg.enabled_transitions) == 2
+        assert hft3 in fg.enabled_transitions
+
+        # enable already enabled transition (no duplicate)
+        fg.enable_transition(hft3)
+        assert len(fg.enabled_transitions) == 2
+
+        # enable_single_transition
+        fg.enable_single_transition(hft1)
+        assert fg.enabled_transitions == [hft1]
+

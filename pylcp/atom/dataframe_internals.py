@@ -149,6 +149,20 @@ class LaserFreqGroup(Generic[Y]):
             self.lasers = []
             self.enabled_transitions = [] if enabled_transitions is None else enabled_transitions
 
+    def enable_transition(self, transition: HFTransitionKey) -> None:
+        """Add the transition to enabled_transition if not already enabled"""
+        if transition not in self.enabled_transitions:
+            self.enabled_transitions.append(transition)
+
+    def disable_transition(self, transition: HFTransitionKey) -> None:
+        """Remove the transition from enabled_transitions"""
+        if transition in self.enabled_transitions:
+            self.enabled_transitions.remove(transition)
+
+    def enable_single_transition(self, transition: HFTransitionKey) -> None:
+        """Make enabled_transitions contain a single item: the passed transition"""
+        self.enabled_transitions = [transition]
+
     def add_laser(self, laser: Y):
         self.lasers.append(laser)
 
