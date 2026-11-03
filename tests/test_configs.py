@@ -14,8 +14,10 @@ from pylcp.typing import PolarizationEnum
 # ==============================================================================
 # 1. Standard 2-Level System (F_g = 0 -> F_e = 1)
 # ==============================================================================
-TWO_LEVEL_GROUND = {"F": 0, "gF": 1.0}
-TWO_LEVEL_EXCITED = {"F": 1, "gF": 1.0}
+# muB=1 keeps Zeeman shifts in units of Gamma; singleF's default (Hz/G) would detune
+# the MOT beams by ~1e6 Gamma and leave only numerical noise in the force tests
+TWO_LEVEL_GROUND = {"F": 0, "gF": 1.0, "muB": 1.0}
+TWO_LEVEL_EXCITED = {"F": 1, "gF": 1.0, "muB": 1.0}
 TWO_LEVEL_DQIJ = {"F": 0, "Fp": 1, "normalize": True}
 TWO_LEVEL_MASS = 87.0
 
@@ -34,7 +36,7 @@ ATOM_RB_SPECIES = "87Rb"
 CONST_B_VECTOR = np.array([1.2, -0.5, 3.4])
 CONST_B_POS = np.array([0.5, -1.0, 2.0])
 
-QUAD_B_GRADIENT = 15.0
+QUAD_B_GRADIENT = 5e-5
 QUAD_B_POSITIONS = [
     np.array([0.0, 0.0, 0.0]),
     np.array([1.0, -2.0, 3.0]),

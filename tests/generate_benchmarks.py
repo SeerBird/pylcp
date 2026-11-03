@@ -37,7 +37,10 @@ from tests.test_configs import (
 )
 
 
-def generate_all_benchmarks(data_dir: str = "tests/data"):
+DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+
+
+def generate_all_benchmarks(data_dir: str = DATA_DIR):
     os.makedirs(data_dir, exist_ok=True)
     print("=" * 60)
     print("Generating Upstream PyLCP Reference Benchmarks")
