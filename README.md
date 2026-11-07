@@ -1,3 +1,25 @@
+# About this fork
+
+This is a fork of [pylcp](https://github.com/JQIamo/pylcp) (Eckel, Barker & Norrgard) that adds magnetic-dipole (RF/microwave) couplings alongside the optical ones. I built it to model a Rb clock-transition calibration scheme that uses both microwave and Raman couplings. **Work in progress.**
+
+Changes from upstream:
+- **Magnetic-dipole couplings** (`RFField`): RF/microwave fields that drive transitions between ground-state blocks, at the same time as the lasers.
+- **`DataFrame`**: an atom-centric way to set up a problem. Pick a predefined atom, add lasers and fields by transition, and get the Hamiltonian and governing equations.
+- **Faster** Hamiltonian construction and OBE evolution-matrix assembly.
+- Tests that compare results against released pylcp 1.0.2.
+
+![Closed Δ-system in ⁸⁷Rb](examples/case3_combined_100us.png)
+*Example ([`examples/microwave.py`](examples/microwave.py)): ⁸⁷Rb clock states |F=1, m_F=0⟩ and |F=2, m_F=0⟩, coupled directly by a microwave and through an excited state by two lasers. The plots show populations and clock coherence over 100 µs.*
+
+Install (Python ≥ 3.10):
+```
+pip install git+https://github.com/SeerBird/pylcp
+```
+
+---
+
+*Original README below.*
+
 pylcp
 =================================
 

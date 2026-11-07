@@ -139,3 +139,6 @@ dmypy.json
 doc/pylcp.bbl
 doc/pylcp.blg
 doc/pylcp.out
+
+# IDE
+.idea/

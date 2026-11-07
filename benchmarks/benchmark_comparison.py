@@ -2,7 +2,7 @@
 Performance Benchmark & Profiling: Upstream PyLCP vs. Optimized Fork
 
 This script benchmarks the speed of the optimized fork against upstream PyLCP across:
-1. Hamiltonians: Kronecker product vectorization & Wigner symbol caching (60x speedup).
+1. Hamiltonians: Kronecker product vectorization & Wigner symbol caching.
 2. RateEq: Equilibrium population solver, force profile, and 3D MOT motion.
 3. OBE (N=4 Toy System): Evolution matrix assembly throughput, density evolution, and motion.
 4. OBE (N=8 Multi-Level System): Coupled density and motion evolution.
@@ -24,10 +24,10 @@ import concurrent.futures
 from typing import Callable, Tuple, Any
 import numpy as np
 
-from pylcp.typing import PolarizationEnum
+# Ensure repo root is on sys.path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-# Ensure root directory is on sys.path
-sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+from pylcp.typing import PolarizationEnum
 
 import tests.vendor.upstream_pylcp as upstream
 import pylcp as fork
